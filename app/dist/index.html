@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Journey-Forge Local</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--mut:#9aa3b2;--acc:#5b8cff;--ok:#3ecf8e;--warn:#e0b341;--err:#e0584b}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px}
+  header h1{font-size:16px;margin:0;font-weight:650}
+  header .sp{flex:1}
+  .keybox{display:flex;gap:6px;align-items:center;color:var(--mut)}
+  .keybox input{width:200px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:5px 8px;border-radius:6px}
+  nav{display:flex;gap:4px;padding:10px 20px 0}
+  nav button{background:none;border:none;color:var(--mut);padding:8px 14px;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px}
+  nav button.on{color:var(--fg);background:var(--panel)}
+  main{padding:18px 20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+  .card h2{margin:0 0 10px;font-size:14px}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:550;font-size:12px}
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;border:1px solid var(--line)}
+  .pill.ok{color:var(--ok);border-color:var(--ok)} .pill.run{color:var(--warn);border-color:var(--warn)}
+  .pill.err{color:var(--err);border-color:var(--err)} .pill.mut{color:var(--mut)}
+  button.act{background:var(--acc);border:none;color:#fff;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px}
+  button.ghost{background:none;border:1px solid var(--line);color:var(--fg);padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px}
+  button.danger{background:none;border:1px solid var(--err);color:var(--err)}
+  button:disabled{opacity:.5;cursor:default}
+  label{display:block;color:var(--mut);font-size:12px;margin:10px 0 4px}
+  input[type=text],input[type=password],select{width:100%;max-width:520px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:8px 10px;border-radius:7px}
+  code,pre{font-family:ui-monospace,Menlo,monospace}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .mut{color:var(--mut)} .ok{color:var(--ok)} .err{color:var(--err)}
+  .toast{position:fixed;right:18px;bottom:18px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--acc);padding:10px 14px;border-radius:8px;max-width:380px;opacity:0;transition:.2s}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>Journey-Forge&nbsp;Local</h1>
+  <span class="pill mut" id="srv">checking…</span>
+  <span class="sp"></span>
+  <div class="keybox">server key <input id="apikey" type="password" placeholder="jfl-local-dev-key" /></div>
+</header>
+<nav>
+  <button data-tab="traj" class="on">Trajectories</button>
+  <button data-tab="skills">Skills</button>
+  <button data-tab="browser">Browser&nbsp;execution</button>
+  <button data-tab="ext">Extension</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s,e=document)=>e.querySelector(s);
+const main = $('#main');
+const KEY_LS = 'jfl_api_key';
+const keyInput = $('#apikey');
+keyInput.value = localStorage.getItem(KEY_LS) || 'jfl-local-dev-key';
+keyInput.addEventListener('change',()=>{localStorage.setItem(KEY_LS,keyInput.value);refresh();});
+
+function authHeaders(extra){return Object.assign({'Authorization':'Bearer '+keyInput.value}, extra||{});}
+async function api(path, opts){
+  const o = Object.assign({headers:{}}, opts||{});
+  o.headers = authHeaders(o.headers);
+  const r = await fetch(path, o);
+  if(!r.ok){ const t = await r.text().catch(()=> ''); throw new Error(r.status+' '+t.slice(0,200)); }
+  const ct = r.headers.get('content-type')||'';
+  return ct.includes('json') ? r.json() : r;
+}
+let toastT;
+function toast(msg, err){const t=$('#toast');t.textContent=msg;t.style.borderLeftColor=err?'var(--err)':'var(--acc)';t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3500);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function pill(status){const m={accepted:'ok',done:'ok',running:'run',processing:'run',error:'err',degraded:'err'};return `<span class="pill ${m[status]||'mut'}">${esc(status||'-')}</span>`;}
+
+let TAB='traj';
+document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{
+  TAB=b.dataset.tab; document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b)); refresh();
+}));
+
+async function pingServer(){
+  try{ await fetch('/'); $('#srv').textContent='server online'; $('#srv').className='pill ok'; }
+  catch{ $('#srv').textContent='server offline'; $('#srv').className='pill err'; }
+}
+
+async function refresh(){
+  pingServer();
+  try{ await ({traj:tabTraj,skills:tabSkills,browser:tabBrowser,ext:tabExt,settings:tabSettings}[TAB])(); }
+  catch(e){ main.innerHTML = `<div class="card"><span class="err">${esc(e.message)}</span><p class="mut">Check the server key (top right).</p></div>`; }
+}
+
+// ── Trajectories ──────────────────────────────────────────────────────────────
+async function tabTraj(){
+  const {trajectories} = await api('/api/traj');
+  const rows = trajectories.map(t=>`
+    <tr>
+      <td><strong>${esc(t.label||'(untitled)')}</strong><div class="mut">${esc(t.description||'')}</div>
+          <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div></td>
+      <td>${pill(t.status)}</td>
+      <td>${pill(t.distill_status)}</td>
+      <td><div class="row">
+        <button class="act" onclick="distill('${t.upload_id}')">Distill</button>
+        <button class="ghost" onclick="dlzip('${t.upload_id}')">Desktop .zip</button>
+      </div></td>
+    </tr>`).join('');
+  main.innerHTML = `<div class="card"><h2>Uploaded trajectories</h2>
+    ${trajectories.length? `<table><thead><tr><th>Task</th><th>Upload</th><th>Distill</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p class="mut">No trajectories yet. Record one with the extension and finalize it.</p>'}</div>`;
+}
+window.distill = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}); toast('Distill started'); setTimeout(refresh,800);}catch(e){toast(e.message,true);} };
+window.dlzip = async (id)=>{
+  try{ const r = await api('/api/skills/zip/'+id); const blob = await r.blob();
+    const u = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=id+'.zip'; a.click(); URL.revokeObjectURL(u);
+    toast('Downloaded. Upload it in Claude Desktop → Settings → Skills.');
+  }catch(e){ toast(e.message,true); }
+};
+
+// ── Skills (installed for Claude Code) ────────────────────────────────────────
+async function tabSkills(){
+  const d = await api('/api/skills');
+  const rows = (d.installed||[]).map(s=>`<tr><td><strong>${esc(s.name)}</strong><div class="mut" style="font-size:11px">${esc(s.path)}</div></td>
+     <td>${s.bytes} B</td><td><button class="ghost danger" onclick="delskill('${esc(s.name)}')">Delete</button></td></tr>`).join('');
+  main.innerHTML = `<div class="card"><h2>Installed skills (Claude Code)</h2>
+    <p class="mut">Root: <code>${esc(d.skills_root)}</code> — Claude Code reads these automatically. For Claude Desktop, download the <b>.zip</b> from Trajectories and upload it in Settings → Skills.</p>
+    ${(d.installed||[]).length? `<table><thead><tr><th>Name</th><th>Size</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p class="mut">No skills installed yet.</p>'}</div>`;
+}
+window.delskill = async (name)=>{ if(!confirm('Delete skill '+name+'?'))return; try{ await api('/api/skills/'+encodeURIComponent(name),{method:'DELETE'}); toast('Deleted'); refresh();}catch(e){toast(e.message,true);} };
+
+// ── Browser execution (Playwright MCP for Claude Desktop) ─────────────────────
+async function tabBrowser(){
+  const d = await api('/api/desktop/config');
+  main.innerHTML = `<div class="card"><h2>Browser execution — Playwright MCP</h2>
+    <p class="mut">A distilled skill is an operating guide. For Claude Desktop to actually click/type/navigate, it needs the Playwright MCP server configured. A skill does not grant tools by itself.</p>
+    <p>Config file: <code>${esc(d.config_path)}</code> · exists: ${d.config_exists?'<span class="ok">yes</span>':'<span class="mut">no</span>'} · Playwright: ${d.playwright_configured?'<span class="ok">configured</span>':'<span class="err">not configured</span>'}</p>
+    <div class="row"><button class="act" onclick="setupPw()">Configure Playwright MCP automatically</button></div>
+    <p class="mut" style="margin-top:10px">${esc(d.note)}</p>
+    <details style="margin-top:8px"><summary class="mut">Manual snippet</summary>
+      <pre>${esc(JSON.stringify(d.snippet,null,2))}</pre></details></div>`;
+}
+window.setupPw = async ()=>{ try{ const r = await api('/api/desktop/playwright',{method:'POST'}); toast(r.message); refresh(); }catch(e){ toast(e.message,true); } };
+
+// ── Extension ─────────────────────────────────────────────────────────────────
+async function tabExt(){
+  const d = await api('/api/ext');
+  main.innerHTML = `<div class="card"><h2>Browser extension</h2>
+    <p>Build dir: <code>${esc(d.build_dir)}</code> · built: ${d.built?'<span class="ok">yes</span>':'<span class="err">no — run <code>pnpm build</code> in extension/</span>'}</p>
+    <ol>${(d.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol></div>`;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+async function tabSettings(){
+  const c = await api('/api/config');
+  main.innerHTML = `<div class="card"><h2>Settings</h2>
+    <label>LLM API key ${c.llm_key_set?'<span class="ok">(set)</span>':'<span class="err">(not set — distillation will fail)</span>'}</label>
+    <input id="s_key" type="password" placeholder="sk-ant-… (leave blank to keep current)" />
+    <label>LLM base URL</label><input id="s_base" type="text" value="${esc(c.llm_base)}" />
+    <label>Distill model</label><input id="s_model" type="text" value="${esc(c.distill_model)}" />
+    <label>Skills root (Claude Code install target)</label><input id="s_root" type="text" value="${esc(c.skills_root)}" />
+    <label><input id="s_auto" type="checkbox" ${c.auto_distill?'checked':''} style="width:auto;margin-right:6px"/> Auto-distill on finalize</label>
+    <div class="row" style="margin-top:14px"><button class="act" onclick="saveSettings()">Save</button></div></div>`;
+}
+window.saveSettings = async ()=>{
+  const body = { llm_base:$('#s_base').value, distill_model:$('#s_model').value, skills_root:$('#s_root').value, auto_distill:$('#s_auto').checked };
+  const k = $('#s_key').value; if(k) body.llm_key = k;
+  try{ await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Saved'); refresh(); }
+  catch(e){ toast(e.message,true); }
+};
+
+refresh();
+setInterval(pingServer, 8000);
+</script>
+</body>
+</html>

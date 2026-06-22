@@ -1,0 +1,20 @@
+# dependencies & build output
+**/node_modules/
+extension/dist/
+extension/.wxt/
+extension/.output/
+
+# NOTE: app/dist/ is intentionally committed — it is the zero-build control panel.
+
+# local config & data
+.env.local
+data/
+*.log
+
+# python
+__pycache__/
+*.pyc
+
+# os / editor
+.DS_Store
+*.swp
