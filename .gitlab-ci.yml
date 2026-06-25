@@ -9,6 +9,11 @@ build-app:
   stage: build
   image: node:20-bookworm-slim
   variables:
+    # Recreate the working dir each run. An earlier in-place build left a
+    # pathologically nested out/JourneyForgeLocal.app/.../out/... in the runner's
+    # persistent build dir; git clean (fetch strategy) can't remove that long
+    # path and the job died before the script. clone wipes it via rm -rf.
+    GIT_STRATEGY: clone
     npm_config_cache: "$CI_PROJECT_DIR/.npm"
     PNPM_STORE: "$CI_PROJECT_DIR/.pnpm-store"
   cache:
