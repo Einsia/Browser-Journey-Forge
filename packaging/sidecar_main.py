@@ -36,6 +36,18 @@ def _default_data_dir() -> Path:
 
 def main() -> int:
     base = _bundle_base()
+
+    # Subcommand: serve the stdio MCP skill server instead of the HTTP server.
+    # Claude Desktop spawns `jfl-server mcp-skill` (see _skill_mcp_entry in
+    # server.py); it reads the registry from JFL_DATA_DIR (passed in the entry's
+    # env) and returns distilled skills over stdio. Must short-circuit BEFORE we
+    # start uvicorn.
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp-skill":
+        sys.path.insert(0, str(base / "server"))
+        import skill_mcp  # noqa: E402
+        skill_mcp.serve()
+        return 0
+
     os.environ.setdefault("JFL_DATA_DIR", str(_default_data_dir()))
     os.environ.setdefault("JFL_APP_BUILD", str(base / "app" / "dist"))
 

@@ -792,6 +792,30 @@ def _playwright_entry() -> dict:
     }
 
 
+def _self_mcp_command() -> tuple[str, list[str]]:
+    """How to relaunch THIS program as the stdio MCP skill server.
+
+    Frozen (PyInstaller sidecar): the binary itself + the 'mcp-skill' subcommand.
+    Dev: the python interpreter + server.py + 'mcp-skill'.
+    """
+    if getattr(sys, "frozen", False):
+        return sys.executable, ["mcp-skill"]
+    return sys.executable, [str(Path(__file__).resolve()), "mcp-skill"]
+
+
+def _skill_mcp_entry() -> dict:
+    """MCP entry that serves distilled skills to Claude Desktop. It reads the
+    registry fresh on each call, so newly-distilled skills are available with no
+    restart — only ADDING this server needs the (one-time) restart."""
+    command, args = _self_mcp_command()
+    return {
+        "command": command,
+        "args": args,
+        # Point the MCP process at the same data dir the pipeline writes to.
+        "env": {"JFL_DATA_DIR": str(DATA_DIR), "PYTHONUNBUFFERED": "1"},
+    }
+
+
 @app.get("/api/desktop/config")
 def api_desktop_config(authorization: str = Header(None)):
     _check_auth(authorization)
@@ -804,17 +828,28 @@ def api_desktop_config(authorization: str = Header(None)):
             has_pw = "playwright" in (data.get("mcpServers") or {})
         except (json.JSONDecodeError, OSError):
             pass
+    has_skills = False
+    if exists:
+        try:
+            data = json.loads(cfg_path.read_text())
+            has_skills = "journey-forge-skills" in (data.get("mcpServers") or {})
+        except (json.JSONDecodeError, OSError):
+            pass
     npx, node = _find_npx()
     return {
         "config_path": str(cfg_path),
         "config_exists": exists,
         "playwright_configured": has_pw,
+        "skills_mcp_configured": has_skills,
         "platform": platform.system(),
         "node_found": bool(npx),
         "node_path": node,
         "npx_path": npx,
         "node_version": _node_version(node),
-        "snippet": {"mcpServers": {"playwright": _playwright_entry()}},
+        "snippet": {"mcpServers": {
+            "playwright": _playwright_entry(),
+            "journey-forge-skills": _skill_mcp_entry(),
+        }},
         "note": "Restart Claude Desktop after configuring for the change to take effect.",
     }
 
@@ -888,18 +923,26 @@ def api_desktop_playwright(authorization: str = Header(None)):
         except json.JSONDecodeError:
             raise HTTPException(422, f"{cfg_path} is not valid JSON; fix or remove it first")
         shutil.copy2(cfg_path, cfg_path.with_suffix(cfg_path.suffix + ".jfl.bak"))
+    skill_entry = _skill_mcp_entry()
     servers = data.setdefault("mcpServers", {})
-    already = servers.get("playwright") == entry
+    already = servers.get("playwright") == entry and servers.get("journey-forge-skills") == skill_entry
     servers["playwright"] = entry
+    # Install the distilled-skill MCP server alongside Playwright so both come up
+    # in the SAME restart. Afterwards, newly-distilled skills are served live
+    # (the tool reads the registry per call) — no further restarts needed.
+    servers["journey-forge-skills"] = skill_entry
     _atomic_write(cfg_path, json.dumps(data, indent=2, ensure_ascii=False))
-    logger.info("[desktop] playwright MCP %s in %s (npx=%s)", "present" if already else "written", cfg_path, npx)
+    logger.info("[desktop] playwright + skills MCP %s in %s (npx=%s)",
+                "present" if already else "written", cfg_path, npx)
     return {
         "ok": True,
         "config_path": str(cfg_path),
         "npx": npx,
+        "skills_mcp": True,
         "already_configured": already,
         "restart_required": not already,
-        "message": "Playwright MCP configured (absolute npx). Restart Claude Desktop to apply.",
+        "message": ("Playwright + distilled-skill MCP configured. Restart Claude Desktop ONCE to apply; "
+                    "after that, recording → auto-distill makes new skills available with no restart."),
     }
 
 
@@ -918,6 +961,14 @@ if APP_BUILD.exists():
 
 
 if __name__ == "__main__":
+    # Subcommand dispatch: the same binary doubles as the stdio MCP skill server
+    # (Claude Desktop spawns it via claude_desktop_config.json). Paths/env are
+    # already set above, so harness state resolves to the same data dir.
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp-skill":
+        import skill_mcp
+        skill_mcp.serve()
+        sys.exit(0)
+
     import uvicorn
     _ensure_dirs()
     _load_api_keys()
