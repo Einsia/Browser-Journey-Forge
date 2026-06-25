@@ -36,10 +36,13 @@ import platform
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
+import tarfile
 import threading
 import time
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -729,7 +732,64 @@ def _claude_desktop_config_path() -> Path:
     return home / ".config" / "Claude" / "claude_desktop_config.json"
 
 
-_PLAYWRIGHT_MCP = {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]}
+# ── Node.js detection + one-click install (Playwright MCP needs npx) ──────────
+NODE_VERSION = os.environ.get("JFL_NODE_VERSION", "v22.11.0")
+
+
+def _node_arch() -> str:
+    return "arm64" if platform.machine() == "arm64" else "x64"
+
+
+def _node_private_dir() -> Path:
+    return DATA_DIR / "node" / f"node-{NODE_VERSION}-darwin-{_node_arch()}"
+
+
+def _find_npx() -> tuple[str | None, str | None]:
+    """Resolve absolute (npx, node). Claude Desktop spawns MCP servers with a
+    minimal GUI PATH, so a bare 'npx' often fails — we always write absolutes."""
+    # 1) our private copy
+    priv = _node_private_dir() / "bin"
+    if (priv / "npx").exists() and (priv / "node").exists():
+        return str(priv / "npx"), str(priv / "node")
+    # 2) common install locations + nvm
+    cand_dirs = [Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path("/usr/bin")]
+    nvm = Path.home() / ".nvm" / "versions" / "node"
+    if nvm.is_dir():
+        cand_dirs += [p / "bin" for p in sorted(nvm.iterdir(), reverse=True)]
+    for d in cand_dirs:
+        if (d / "npx").exists() and (d / "node").exists():
+            return str(d / "npx"), str(d / "node")
+    # 3) whatever is on PATH
+    npx, node = shutil.which("npx"), shutil.which("node")
+    if npx and node:
+        return npx, node
+    return None, None
+
+
+def _node_version(node: str | None) -> str:
+    if not node:
+        return ""
+    try:
+        return subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _playwright_entry() -> dict:
+    """Playwright MCP server entry with an ABSOLUTE npx + a PATH that includes
+    node's dir (+ TLS bypass for self-signed / corporate-MITM npm download)."""
+    npx, node = _find_npx()
+    if not npx:
+        return {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]}  # fallback (likely fails on GUI PATH)
+    node_dir = str(Path(npx).parent)
+    return {
+        "command": npx,
+        "args": ["-y", "@playwright/mcp@latest"],
+        "env": {
+            "PATH": f"{node_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+            "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+        },
+    }
 
 
 @app.get("/api/desktop/config")
@@ -744,25 +804,81 @@ def api_desktop_config(authorization: str = Header(None)):
             has_pw = "playwright" in (data.get("mcpServers") or {})
         except (json.JSONDecodeError, OSError):
             pass
+    npx, node = _find_npx()
     return {
         "config_path": str(cfg_path),
         "config_exists": exists,
         "playwright_configured": has_pw,
         "platform": platform.system(),
-        "snippet": {"mcpServers": {"playwright": _PLAYWRIGHT_MCP}},
+        "node_found": bool(npx),
+        "node_path": node,
+        "npx_path": npx,
+        "node_version": _node_version(node),
+        "snippet": {"mcpServers": {"playwright": _playwright_entry()}},
         "note": "Restart Claude Desktop after configuring for the change to take effect.",
     }
+
+
+@app.get("/api/desktop/node")
+def api_desktop_node(authorization: str = Header(None)):
+    _check_auth(authorization)
+    npx, node = _find_npx()
+    return {
+        "found": bool(npx),
+        "npx": npx,
+        "node": node,
+        "version": _node_version(node),
+        "install_target": str(_node_private_dir()),
+    }
+
+
+@app.post("/api/desktop/install-node")
+def api_desktop_install_node(authorization: str = Header(None)):
+    """Download an isolated Node.js into the app's data dir if none is found,
+    so Playwright MCP (npx) works without the user installing anything."""
+    _check_auth(authorization)
+    npx, node = _find_npx()
+    if npx:
+        return {"ok": True, "already": True, "npx": npx, "node": node, "version": _node_version(node)}
+    if sys.platform != "darwin":
+        raise HTTPException(400, "auto-install currently supports macOS only")
+    base = DATA_DIR / "node"
+    base.mkdir(parents=True, exist_ok=True)
+    url = f"https://nodejs.org/dist/{NODE_VERSION}/node-{NODE_VERSION}-darwin-{_node_arch()}.tar.gz"
+    tgz = base / "node.tgz"
+    try:
+        try:
+            with urllib.request.urlopen(url, timeout=180) as r, open(tgz, "wb") as f:  # noqa: S310
+                shutil.copyfileobj(r, f)
+        except ssl.SSLError:  # self-signed / MITM cert in the chain
+            ctx = ssl._create_unverified_context()  # noqa: S323
+            with urllib.request.urlopen(url, timeout=180, context=ctx) as r, open(tgz, "wb") as f:  # noqa: S310
+                shutil.copyfileobj(r, f)
+        with tarfile.open(tgz) as t:
+            t.extractall(base)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"node download/extract failed: {e}")
+    finally:
+        tgz.unlink(missing_ok=True)
+    npx, node = _find_npx()
+    if not npx:
+        raise HTTPException(500, "installed Node but npx not found afterwards")
+    logger.info("[desktop] installed Node %s → %s", NODE_VERSION, npx)
+    return {"ok": True, "npx": npx, "node": node, "version": _node_version(node)}
 
 
 @app.post("/api/desktop/playwright")
 def api_desktop_playwright(authorization: str = Header(None)):
     """Add the Playwright MCP server to claude_desktop_config.json (idempotent).
 
-    Backs up any existing config to <file>.jfl.bak before writing. After this,
-    the user restarts Claude Desktop and distilled skills can really drive a
-    browser (click/type/navigate) instead of being advisory text only.
+    Writes an absolute npx path + PATH env (GUI apps have a minimal PATH), so the
+    server actually spawns. Backs up any existing config to <file>.jfl.bak.
     """
     _check_auth(authorization)
+    npx, _node = _find_npx()
+    if not npx:
+        raise HTTPException(400, "Node.js / npx not found — install it first (POST /api/desktop/install-node)")
+    entry = _playwright_entry()
     cfg_path = _claude_desktop_config_path()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     data = {}
@@ -773,16 +889,17 @@ def api_desktop_playwright(authorization: str = Header(None)):
             raise HTTPException(422, f"{cfg_path} is not valid JSON; fix or remove it first")
         shutil.copy2(cfg_path, cfg_path.with_suffix(cfg_path.suffix + ".jfl.bak"))
     servers = data.setdefault("mcpServers", {})
-    already = servers.get("playwright") == _PLAYWRIGHT_MCP
-    servers["playwright"] = _PLAYWRIGHT_MCP
+    already = servers.get("playwright") == entry
+    servers["playwright"] = entry
     _atomic_write(cfg_path, json.dumps(data, indent=2, ensure_ascii=False))
-    logger.info("[desktop] playwright MCP %s in %s", "present" if already else "written", cfg_path)
+    logger.info("[desktop] playwright MCP %s in %s (npx=%s)", "present" if already else "written", cfg_path, npx)
     return {
         "ok": True,
         "config_path": str(cfg_path),
+        "npx": npx,
         "already_configured": already,
         "restart_required": not already,
-        "message": "Playwright MCP configured. Restart Claude Desktop to apply.",
+        "message": "Playwright MCP configured (absolute npx). Restart Claude Desktop to apply.",
     }
 
 

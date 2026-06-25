@@ -152,13 +152,21 @@ window.distill = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}
 // ── Browser execution (Playwright MCP for Claude Desktop) ─────────────────────
 async function tabBrowser(){
   const d = await api('/api/desktop/config');
+  const nodeRow = d.node_found
+    ? `<span class="ok">Node ${esc(d.node_version||'')}</span> · <code>${esc(d.npx_path||'')}</code>`
+    : `<span class="err">Node / npx not found</span> — Playwright MCP needs it`;
+  const nodeBtn = d.node_found ? '' : `<button class="act" onclick="installNode()">Install Node (one-click)</button>`;
   main.innerHTML = `<div class="card"><h2>Browser execution — Playwright MCP</h2>
-    <p class="mut">A distilled skill is an operating guide. For Claude Desktop to actually click/type/navigate, it needs the Playwright MCP server. A skill grants no tools by itself.</p>
-    <p>Config: <code>${esc(d.config_path)}</code> · exists: ${d.config_exists?'<span class="ok">yes</span>':'<span class="mut">no</span>'} · Playwright: ${d.playwright_configured?'<span class="ok">configured</span>':'<span class="err">not configured</span>'}</p>
-    <div class="row"><button class="act" onclick="setupPw()">Configure Playwright MCP automatically</button></div>
-    <p class="mut" style="margin-top:10px">${esc(d.note)}</p>
+    <p class="mut">A distilled skill is an operating guide. For Claude Desktop to actually click/type/navigate it needs the Playwright MCP server — which runs on Node. A skill grants no tools by itself.</p>
+    <p><b>Step 1 · Node:</b> ${nodeRow}</p>
+    <div class="row">${nodeBtn}
+      <button class="${d.node_found?'act':'ghost'}" onclick="setupPw()" ${d.node_found?'':'disabled'}>Step 2 · Configure Playwright MCP</button>
+    </div>
+    <p>Config: <code>${esc(d.config_path)}</code> · Playwright: ${d.playwright_configured?'<span class="ok">configured</span>':'<span class="err">not configured</span>'}</p>
+    <p class="mut" style="margin-top:6px">${esc(d.note)} Then test in a normal chat: “use playwright to open example.com”.</p>
     <details style="margin-top:8px"><summary class="mut">Manual snippet</summary><pre>${esc(JSON.stringify(d.snippet,null,2))}</pre></details></div>`;
 }
+window.installNode = async ()=>{ toast('Downloading Node… (~30s)'); try{ const r=await api('/api/desktop/install-node',{method:'POST'}); toast('Node ready: '+(r.version||r.npx)); refresh(); }catch(e){ toast(e.message,true);} };
 window.setupPw = async ()=>{ try{ const r=await api('/api/desktop/playwright',{method:'POST'}); toast(r.message); refresh(); }catch(e){ toast(e.message,true);} };
 
 // ── Extension (record tasks) ──────────────────────────────────────────────────
