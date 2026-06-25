@@ -404,6 +404,7 @@ def _assemble_trace(upload_id: str, meta: dict) -> list[dict]:
 # into a single binary (PyInstaller sidecar / native app). Serialized by a lock
 # so concurrent finalizes don't race on buckets.json.
 _PIPELINE_LOCK = threading.Lock()
+_PROGRESS: dict[str, dict] = {}     # upload_id → {phase,current,total,detail} (in-memory, live)
 
 
 def _apply_harness_config(cfg: dict) -> None:
@@ -427,18 +428,28 @@ def _apply_harness_config(cfg: dict) -> None:
 def _ingest_distill_install(upload_id: str) -> None:
     """Ingest one trace into the buckets, distill ready buckets, install skills."""
     cfg = _load_config()
+
+    def _rep(phase: str, current: int = 0, total: int = 0, detail: str = "") -> None:
+        _PROGRESS[upload_id] = {"phase": phase, "current": current, "total": total, "detail": detail}
+
     try:
         if not cfg.get("llm_key"):
             raise RuntimeError("no LLM API key configured (set it in Settings)")
         from harness.main import run_distill, run_ingest_file
         from harness.install import install_registry
+        from harness import progress as hprogress
 
         trace_json = _trace_dir(upload_id) / "trace.json"
         with _PIPELINE_LOCK:
+            hprogress.set_reporter(_rep)
             _apply_harness_config(cfg)
+            _rep("ingest", 0, 0, "atomizing")
             run_ingest_file(trace_json)
             run_distill()
+            _rep("install", 0, 0, "")
             installed = install_registry(Path(cfg["skills_root"]))
+            hprogress.set_reporter(None)
+        _rep("done", 0, 0, f"{len(installed)} skill(s)")
         n_buckets = len(_read_json_file(HARNESS_STATE / "buckets.json", {}).get("buckets", {}))
         note = ""
         if not installed:
@@ -451,6 +462,12 @@ def _ingest_distill_install(upload_id: str) -> None:
         logger.info("[pipeline] %s: ok, %d skill(s), %d bucket(s)%s",
                     upload_id, len(installed), n_buckets, f" — {note}" if note else "")
     except Exception as e:  # noqa: BLE001
+        try:
+            from harness import progress as hprogress
+            hprogress.set_reporter(None)
+        except Exception:
+            pass
+        _rep("error", 0, 0, str(e)[:200])
         with update_meta(upload_id) as meta:
             meta["distill_status"] = "error"
             meta["distill_result"] = {"ok": False, "error": str(e)}
@@ -484,6 +501,7 @@ def api_traj(authorization: str = Header(None)):
             "distill_status": m.get("distill_status"),
             "created_at": m.get("created_at"),
             "n_chunks": len(m.get("accepted_chunks", [])),
+            "progress": _PROGRESS.get(m.get("upload_id")),
         })
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"trajectories": items}

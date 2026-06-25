@@ -143,11 +143,15 @@ async def classify_segments(
     Each classified segment's capacity is added to the list for subsequent
     segments, so later segments can match earlier ones' names.
     """
+    from . import progress
+
     caps = list(existing_capacities or [])
     seen_caps: set[str] = {c[0] for c in caps}
     results: list[ClassifiedSegment] = []
 
-    for seg in segments:
+    total = len(segments)
+    for i, seg in enumerate(segments):
+        progress.report("classify", i, total, seg.domain)
         try:
             cs = classify_segment_sync(seg, caps if caps else None)
             results.append(cs)
@@ -157,4 +161,5 @@ async def classify_segments(
         except Exception as e:
             print(f"[classifier] failed {seg.segment_id}: {e}")
 
+    progress.report("classify", total, total, "")
     return results

@@ -38,6 +38,8 @@
   pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .mut{color:var(--mut)} .ok{color:var(--ok)} .err{color:var(--err)}
+  .spin-s{display:inline-block;width:9px;height:9px;border:2px solid var(--line);border-top-color:var(--warn);border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle}
+  @keyframes sp{to{transform:rotate(360deg)}}
   .toast{position:fixed;right:18px;bottom:18px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--acc);padding:10px 14px;border-radius:8px;max-width:380px;opacity:0;transition:.2s;z-index:50}
   .toast.show{opacity:1}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:40}
@@ -121,16 +123,29 @@ window.viewSkill = async (bucket)=>{ try{ const r=await api('/api/skill?bucket='
 window.dlSkillZip = async (bucket)=>{ try{ const r=await api('/api/skill/zip?bucket='+encodeURIComponent(bucket)); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=bucket.replace('::','-')+'.zip'; a.click(); URL.revokeObjectURL(u); toast('Downloaded. Upload it in Claude Desktop → Settings → Skills.'); }catch(e){ toast(e.message,true);} };
 
 // ── Trajectories ──────────────────────────────────────────────────────────────
+const PHASE_LABEL={ingest:'Atomizing',classify:'Classifying',bucket:'Bucketing',distill:'Distilling',install:'Installing',done:'Done',error:'Error'};
+function progCell(t){
+  const p=t.progress;
+  const pillHtml=pill(t.distill_status);
+  if(!p) return pillHtml;
+  const frac=p.total?` ${p.current}/${p.total}`:'';
+  const label=(PHASE_LABEL[p.phase]||p.phase)+frac;
+  const full=label+(p.detail?` — ${p.detail}`:'');
+  const running=t.distill_status==='running';
+  return `${pillHtml}<div class="mut" style="font-size:11px;margin-top:3px" title="${esc(full)}">${running?'<span class="spin-s"></span> ':''}${esc(label)}${p.detail?` · <span class="mut">${esc(p.detail.slice(0,28))}</span>`:''}</div>`;
+}
 async function tabTraj(){
   const {trajectories} = await api('/api/traj');
   const rows = trajectories.map(t=>`<tr>
       <td><strong>${esc(t.label||'(untitled)')}</strong><div class="desc">${esc(t.description||'')}</div>
           <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div></td>
-      <td>${pill(t.status)}</td><td>${pill(t.distill_status)}</td>
+      <td>${pill(t.status)}</td><td>${progCell(t)}</td>
       <td><button class="act" onclick="distill('${t.upload_id}')">Process</button></td></tr>`).join('');
   main.innerHTML = `<div class="card"><h2>Uploaded trajectories</h2>
-    <p class="mut">"Process" ingests the trajectory into the capability buckets and distills any that are ready.</p>
+    <p class="mut">"Process" ingests the trajectory into the capability buckets and distills any that are ready. Hover the Pipeline cell for live detail.</p>
     ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet.</p>'}</div>`;
+  // auto-refresh while anything is running
+  if(trajectories.some(t=>t.distill_status==='running')) setTimeout(()=>{ if(TAB==='traj') tabTraj(); }, 1200);
 }
 window.distill = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}); toast('Pipeline started'); setTimeout(refresh,1200);}catch(e){toast(e.message,true);} };
 

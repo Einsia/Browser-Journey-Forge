@@ -181,8 +181,11 @@ def cmd_distill(args: argparse.Namespace) -> None:
         return
 
     print(f"[distill] distilling {len(targets)} bucket(s)")
+    from . import progress
 
-    for bid, bucket in targets.items():
+    total = len(targets)
+    for idx, (bid, bucket) in enumerate(targets.items()):
+        progress.report("distill", idx, total, f"{bucket.domain}::{bucket.canonical_capacity}")
         try:
             print(f"  [{bucket.domain}] distilling '{bucket.canonical_capacity}' ({len(bucket.segment_ids)} segments)...")
             skill = distill_bucket_sync(bucket, segment_map)
@@ -196,6 +199,7 @@ def cmd_distill(args: argparse.Namespace) -> None:
             print(f"  ✗ {bid}: {e}")
             cp["pipeline"]["distill"]["failed"] += 1
 
+    progress.report("distill", total, total, "")
     save_buckets(buckets)
     save_checkpoint(cp)
     print("[distill] done")
