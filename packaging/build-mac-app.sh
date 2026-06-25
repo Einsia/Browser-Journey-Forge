@@ -6,10 +6,15 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-/tmp}"
-APP="$OUT/JourneyForgeLocal.app"
+mkdir -p "$OUT"
+OUT="$(cd "$OUT" && pwd)"            # absolute, so it's safe even if under REPO
 ZIP="$OUT/JourneyForgeLocal-mac.zip"
 
-rm -rf "$APP" "$ZIP"
+# Assemble in a temp dir OUTSIDE the repo. Building inside the repo would make
+# rsync copy the half-built bundle (and the CI out/ dir) into itself → nesting.
+BUILD="$(mktemp -d)"
+trap 'rm -rf "$BUILD"' EXIT
+APP="$BUILD/JourneyForgeLocal.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/project"
 
 cp "$REPO/packaging/mac-app/Info.plist" "$APP/Contents/Info.plist"
@@ -20,10 +25,11 @@ chmod +x "$APP/Contents/MacOS/JourneyForgeLocal"
 rsync -a \
   --exclude='.git' --exclude='data' --exclude='.env.local' --exclude='.venv' \
   --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' \
+  --exclude='out' --exclude='.pnpm-store' \
   --exclude='extension/.wxt' --exclude='extension/.output' \
   "$REPO"/ "$APP/Contents/Resources/project/"
 
 # Zip with stored unix perms so the launcher stays executable on macOS.
-( cd "$OUT" && zip -q -9 -ry "$ZIP" "JourneyForgeLocal.app" )
-echo "built: $APP"
-echo "zip:   $ZIP"
+rm -f "$ZIP"
+( cd "$BUILD" && zip -q -9 -ry "$ZIP" "JourneyForgeLocal.app" )
+echo "zip: $ZIP"
