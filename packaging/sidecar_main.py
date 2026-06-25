@@ -13,6 +13,7 @@ Run standalone for testing:  python packaging/sidecar_main.py
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -37,7 +38,27 @@ def main() -> int:
     base = _bundle_base()
     os.environ.setdefault("JFL_DATA_DIR", str(_default_data_dir()))
     os.environ.setdefault("JFL_APP_BUILD", str(base / "app" / "dist"))
-    os.environ.setdefault("JFL_EXT_BUILD", str(base / "extension" / "dist" / "chrome-mv3"))
+
+    # The extension ships inside the bundle, but in a onefile build that path is
+    # an EPHEMERAL temp dir (gone on exit) — Chrome's "Load unpacked" needs a
+    # stable folder. Copy it next to the user's data so it persists and is easy
+    # to find, and point the API at that copy.
+    data_dir = Path(os.environ["JFL_DATA_DIR"])
+    bundled_ext = base / "extension" / "dist" / "chrome-mv3"
+    stable_ext = data_dir / "extension" / "chrome-mv3"
+    if bundled_ext.is_dir():
+        try:
+            stable_ext.parent.mkdir(parents=True, exist_ok=True)
+            if stable_ext.exists():
+                shutil.rmtree(stable_ext)
+            shutil.copytree(bundled_ext, stable_ext)
+            os.environ["JFL_EXT_BUILD"] = str(stable_ext)
+            print(f"[sidecar] extension ready at {stable_ext}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            os.environ.setdefault("JFL_EXT_BUILD", str(bundled_ext))
+            print(f"[sidecar] WARN: could not stage extension: {e}", flush=True)
+    else:
+        os.environ.setdefault("JFL_EXT_BUILD", str(bundled_ext))
 
     sys.path.insert(0, str(base))
     sys.path.insert(0, str(base / "server"))

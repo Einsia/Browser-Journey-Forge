@@ -616,12 +616,46 @@ def api_ext(authorization: str = Header(None)):
         "build_dir": str(EXT_BUILD),
         "built": EXT_BUILD.exists(),
         "steps": [
-            "Open chrome://extensions",
-            "Enable Developer mode (top-right)",
-            "Click 'Load unpacked' and select the build_dir above",
-            "The extension is pre-configured to talk to this local server",
+            "Click ‘Open chrome://extensions’ below",
+            "Turn on Developer mode (top-right toggle)",
+            "Click ‘Load unpacked’ and pick the folder that just opened in Finder",
+            "It’s pre-configured to talk to this app — done",
         ],
     }
+
+
+def _os_open(*args: str) -> None:
+    """Open a folder/URL/app via the OS handler (Finder, default browser, …)."""
+    if sys.platform == "darwin":
+        subprocess.run(["open", *args], check=False)
+    elif sys.platform.startswith("win"):
+        subprocess.run(["cmd", "/c", "start", "", *args], check=False)
+    else:
+        subprocess.run(["xdg-open", *args], check=False)
+
+
+@app.post("/api/ext/reveal")
+def api_ext_reveal(authorization: str = Header(None)):
+    _check_auth(authorization)
+    if not EXT_BUILD.exists():
+        raise HTTPException(404, "extension folder not found")
+    _os_open(str(EXT_BUILD))           # reveal the folder in Finder/Explorer
+    return {"ok": True, "path": str(EXT_BUILD)}
+
+
+@app.post("/api/ext/open-chrome")
+def api_ext_open_chrome(authorization: str = Header(None)):
+    _check_auth(authorization)
+    if sys.platform == "darwin":
+        # Open the extensions page in Chrome (best-effort; falls back to Finder reveal).
+        r = subprocess.run(["open", "-a", "Google Chrome", "chrome://extensions/"], check=False)
+        if r.returncode != 0:
+            subprocess.run(["open", "chrome://extensions/"], check=False)
+    elif sys.platform.startswith("win"):
+        subprocess.run(["cmd", "/c", "start", "chrome", "chrome://extensions/"], check=False)
+    else:
+        subprocess.run(["google-chrome", "chrome://extensions/"], check=False)
+    return {"ok": True}
 
 
 # ── Claude Desktop integration (browser execution via Playwright MCP) ─────────

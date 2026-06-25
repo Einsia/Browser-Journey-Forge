@@ -58,6 +58,7 @@
   <button data-tab="sites" class="on">Sites &amp; skills</button>
   <button data-tab="traj">Trajectories</button>
   <button data-tab="browser">Browser&nbsp;execution</button>
+  <button data-tab="ext">Extension</button>
   <button data-tab="settings">Settings</button>
 </nav>
 <main id="main"></main>
@@ -91,7 +92,7 @@ $('#overlay').addEventListener('click',e=>{if(e.target===$('#overlay'))closeModa
 let TAB='sites';
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{TAB=b.dataset.tab;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));refresh();}));
 async function pingServer(){try{await fetch('/');$('#srv').textContent='server online';$('#srv').className='pill ok';}catch{$('#srv').textContent='server offline';$('#srv').className='pill err';}}
-async function refresh(){pingServer();try{await ({sites:tabSites,traj:tabTraj,browser:tabBrowser,settings:tabSettings}[TAB])();}catch(e){main.innerHTML=`<div class="card"><span class="err">${esc(e.message)}</span><p class="mut">Check the server key (top right).</p></div>`;}}
+async function refresh(){pingServer();try{await ({sites:tabSites,traj:tabTraj,browser:tabBrowser,ext:tabExt,settings:tabSettings}[TAB])();}catch(e){main.innerHTML=`<div class="card"><span class="err">${esc(e.message)}</span><p class="mut">Check the server key (top right).</p></div>`;}}
 
 // ── Sites & skills (per-domain capability buckets) ───────────────────────────
 async function tabSites(){
@@ -144,6 +145,22 @@ async function tabBrowser(){
     <details style="margin-top:8px"><summary class="mut">Manual snippet</summary><pre>${esc(JSON.stringify(d.snippet,null,2))}</pre></details></div>`;
 }
 window.setupPw = async ()=>{ try{ const r=await api('/api/desktop/playwright',{method:'POST'}); toast(r.message); refresh(); }catch(e){ toast(e.message,true);} };
+
+// ── Extension (record tasks) ──────────────────────────────────────────────────
+async function tabExt(){
+  const d = await api('/api/ext');
+  main.innerHTML = `<div class="card"><h2>Browser extension (the recorder)</h2>
+    <p class="mut">Chrome only allows true one-click installs from its Web Store. Until we publish there it's a 3-click "Load unpacked" — these buttons do the fiddly parts.</p>
+    <div class="row" style="margin:10px 0">
+      <button class="act" onclick="extOpenChrome()">1 · Open chrome://extensions</button>
+      <button class="ghost" onclick="extReveal()">2 · Reveal the extension folder</button>
+    </div>
+    <ol>${(d.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+    <p class="mut" style="font-size:12px">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>
+    <p class="mut" style="font-size:12px">It auto-connects to this app once loaded. Re-do only after updating the app.</p></div>`;
+}
+window.extOpenChrome = async ()=>{ try{ await api('/api/ext/open-chrome',{method:'POST'}); toast('Opened chrome://extensions — turn on Developer mode (top-right)'); }catch(e){ toast(e.message,true);} };
+window.extReveal = async ()=>{ try{ const r=await api('/api/ext/reveal',{method:'POST'}); toast('Folder opened in Finder — pick it in "Load unpacked"'); }catch(e){ toast(e.message,true);} };
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 async function tabSettings(){
