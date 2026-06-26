@@ -11,6 +11,7 @@ use tauri::Manager;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 const PANEL_URL: &str = "http://127.0.0.1:8099/";
 const ADDR: &str = "127.0.0.1:8099";
@@ -26,6 +27,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 0. On launch, check GitHub Releases for a newer version; if found,
             //    download + install + relaunch. Errors (no release / offline)
@@ -34,9 +36,27 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 if let Ok(updater) = upd.updater() {
                     if let Ok(Some(update)) = updater.check().await {
-                        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
-                            upd.restart();
-                        }
+                        // Ask first — never auto-install silently.
+                        let h = upd.clone();
+                        let ver = update.version.clone();
+                        upd.dialog()
+                            .message(format!(
+                                "Version {ver} is available. Download it and restart the app now?"
+                            ))
+                            .title("Update available")
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "Install".to_string(),
+                                "Later".to_string(),
+                            ))
+                            .show(move |install| {
+                                if install {
+                                    tauri::async_runtime::spawn(async move {
+                                        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+                                            h.restart();
+                                        }
+                                    });
+                                }
+                            });
                     }
                 }
             });

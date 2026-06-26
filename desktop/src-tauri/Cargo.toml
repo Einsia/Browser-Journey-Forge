@@ -1,6 +1,6 @@
 [package]
 name = "journey-forge-local"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [build-dependencies]
@@ -11,6 +11,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
 # generate_context!() expands to serde_json-using code once the updater config
 # (pubkey/endpoints) is present, so these must be direct deps.
 serde = { version = "1", features = ["derive"] }
