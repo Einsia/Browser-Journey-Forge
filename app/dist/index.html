@@ -47,20 +47,23 @@
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:min(820px,92vw);max-height:86vh;display:flex;flex-direction:column}
   .modal header{justify-content:space-between}
   .modal .body{overflow:auto;padding:0 16px 16px}
+  .sw{position:relative;display:inline-block;width:42px;height:24px;flex:none}
+  .sw input{opacity:0;width:0;height:0}
+  .sw .sl{position:absolute;inset:0;background:var(--line);border-radius:24px;transition:.2s;cursor:pointer}
+  .sw .sl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+  .sw input:checked + .sl{background:var(--ok)}
+  .sw input:checked + .sl:before{transform:translateX(18px)}
+  .sw input:disabled + .sl{opacity:.5;cursor:default}
+  .toggle-row{display:flex;align-items:center;gap:10px;margin:10px 0}
 </style>
 </head>
 <body>
 <header>
   <h1>Journey-Forge&nbsp;Local</h1>
   <span class="pill mut" id="srv">checking…</span>
-  <span class="sp"></span>
-  <div class="keybox">server key <input id="apikey" type="password" placeholder="jfl-local-dev-key" /></div>
 </header>
 <nav>
-  <button data-tab="sites" class="on">Sites &amp; skills</button>
-  <button data-tab="traj">Trajectories</button>
-  <button data-tab="browser">Browser&nbsp;execution</button>
-  <button data-tab="ext">Extension</button>
+  <button data-tab="skills" class="on">Skills &amp; trajectories</button>
   <button data-tab="settings">Settings</button>
 </nav>
 <main id="main"></main>
@@ -73,11 +76,9 @@
 <script>
 const $ = (s,e=document)=>e.querySelector(s);
 const main = $('#main');
-const keyInput = $('#apikey');
-keyInput.value = localStorage.getItem('jfl_api_key') || 'jfl-local-dev-key';
-keyInput.addEventListener('change',()=>{localStorage.setItem('jfl_api_key',keyInput.value);refresh();});
+let API_KEY = localStorage.getItem('jfl_api_key') || 'jfl-local-dev-key';
 
-function authHeaders(extra){return Object.assign({'Authorization':'Bearer '+keyInput.value}, extra||{});}
+function authHeaders(extra){return Object.assign({'Authorization':'Bearer '+API_KEY}, extra||{});}
 async function api(path, opts){
   const o = Object.assign({headers:{}}, opts||{}); o.headers = authHeaders(o.headers);
   const r = await fetch(path,o);
@@ -91,15 +92,19 @@ function openModal(title,body){$('#m-title').textContent=title;$('#m-body').text
 function closeModal(){$('#overlay').classList.remove('show');}
 $('#overlay').addEventListener('click',e=>{if(e.target===$('#overlay'))closeModal();});
 
-let TAB='sites';
+let TAB='skills';
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{TAB=b.dataset.tab;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));refresh();}));
 async function pingServer(){try{await fetch('/');$('#srv').textContent='server online';$('#srv').className='pill ok';}catch{$('#srv').textContent='server offline';$('#srv').className='pill err';}}
-async function refresh(){pingServer();try{await ({sites:tabSites,traj:tabTraj,browser:tabBrowser,ext:tabExt,settings:tabSettings}[TAB])();}catch(e){main.innerHTML=`<div class="card"><span class="err">${esc(e.message)}</span><p class="mut">Check the server key (top right).</p></div>`;}}
+async function refresh(){pingServer();try{await ({skills:tabSkills,settings:tabSettings}[TAB])();}catch(e){main.innerHTML=`<div class="card"><span class="err">${esc(e.message)}</span><p class="mut">If this is an auth error, set the server key in Settings.</p></div>`;}}
 
-// ── Sites & skills (per-domain capability buckets) ───────────────────────────
-async function tabSites(){
-  const d = await api('/api/buckets');
-  if(!d.domains.length){ main.innerHTML=`<div class="card"><h2>Sites &amp; skills</h2><p class="mut">No skill buckets yet. Record a task with the extension and finalize it — each capability becomes a bucket under its website, and distills into a skill.</p></div>`; return; }
+// ── Skills & trajectories (combined preview) ─────────────────────────────────
+async function tabSkills(){
+  const [traj, buckets] = await Promise.all([api('/api/traj'), api('/api/buckets')]);
+  main.innerHTML = trajSection(traj) + bucketsSection(buckets);
+  if(traj.trajectories.some(t=>t.distill_status==='running')) setTimeout(()=>{ if(TAB==='skills') tabSkills(); }, 1200);
+}
+function bucketsSection(d){
+  if(!d.domains.length) return `<div class="card"><h2>Distilled skills</h2><p class="mut">No skill buckets yet. Record a task with the extension and Process it — each capability becomes a skill under its website.</p></div>`;
   const sites = d.domains.map(site=>{
     const rows = site.buckets.map(b=>{
       const status = b.distilled ? `<span class="pill ok">distilled v${b.version}</span>` : `<span class="pill run">pending</span>`;
@@ -115,14 +120,13 @@ async function tabSites(){
         <span class="pill mut">${site.buckets.length} capabilit${site.buckets.length===1?'y':'ies'}</span></h3>
       <table><thead><tr><th>Capability</th><th>Segments</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }).join('');
-  main.innerHTML = `<div class="card"><h2>Sites &amp; skills</h2>
+  return `<div class="card"><h2>Distilled skills</h2>
     <p class="mut">Each website accumulates a bucket of capabilities. Every recorded task is atomized into segments, classified into a capability, and distilled into one reusable skill per capability.</p>
     ${sites}</div>`;
 }
 window.viewSkill = async (bucket)=>{ try{ const r=await api('/api/skill?bucket='+encodeURIComponent(bucket)); openModal(bucket, r.skill_md); }catch(e){ toast(e.message,true);} };
 window.dlSkillZip = async (bucket)=>{ try{ const r=await api('/api/skill/zip?bucket='+encodeURIComponent(bucket)); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=bucket.replace('::','-')+'.zip'; a.click(); URL.revokeObjectURL(u); toast('Downloaded. Upload it in Claude Desktop → Settings → Skills.'); }catch(e){ toast(e.message,true);} };
 
-// ── Trajectories ──────────────────────────────────────────────────────────────
 const PHASE_LABEL={ingest:'Atomizing',classify:'Classifying',bucket:'Bucketing',distill:'Distilling',install:'Installing',done:'Done',error:'Error'};
 function progCell(t){
   const p=t.progress;
@@ -134,65 +138,41 @@ function progCell(t){
   const running=t.distill_status==='running';
   return `${pillHtml}<div class="mut" style="font-size:11px;margin-top:3px" title="${esc(full)}">${running?'<span class="spin-s"></span> ':''}${esc(label)}${p.detail?` · <span class="mut">${esc(p.detail.slice(0,28))}</span>`:''}</div>`;
 }
-async function tabTraj(){
-  const {trajectories} = await api('/api/traj');
+function trajSection({trajectories}){
   const rows = trajectories.map(t=>`<tr>
       <td><strong>${esc(t.label||'(untitled)')}</strong><div class="desc">${esc(t.description||'')}</div>
           <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div></td>
       <td>${pill(t.status)}</td><td>${progCell(t)}</td>
       <td><button class="act" onclick="distill('${t.upload_id}')">Process</button></td></tr>`).join('');
-  main.innerHTML = `<div class="card"><h2>Uploaded trajectories</h2>
+  return `<div class="card"><h2>Recorded trajectories</h2>
     <p class="mut">"Process" ingests the trajectory into the capability buckets and distills any that are ready. Hover the Pipeline cell for live detail.</p>
-    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet.</p>'}</div>`;
-  // auto-refresh while anything is running
-  if(trajectories.some(t=>t.distill_status==='running')) setTimeout(()=>{ if(TAB==='traj') tabTraj(); }, 1200);
+    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
 }
 window.distill = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}); toast('Pipeline started'); setTimeout(refresh,1200);}catch(e){toast(e.message,true);} };
 
-// ── Browser execution (Playwright MCP for Claude Desktop) ─────────────────────
-async function tabBrowser(){
-  const d = await api('/api/desktop/config');
-  const nodeRow = d.node_found
-    ? `<span class="ok">Node ${esc(d.node_version||'')}</span> · <code>${esc(d.npx_path||'')}</code>`
-    : `<span class="err">Node / npx not found</span> — Playwright MCP needs it`;
-  const nodeBtn = d.node_found ? '' : `<button class="act" onclick="installNode()">Install Node (one-click)</button>`;
-  const skillsRow = d.skills_mcp_configured
-    ? '<span class="ok">configured</span>'
-    : '<span class="err">not configured</span>';
-  main.innerHTML = `<div class="card"><h2>Browser execution — Playwright MCP</h2>
-    <p class="mut">A distilled skill is an operating guide. For Claude Desktop to actually click/type/navigate it needs the Playwright MCP server — which runs on Node. A skill grants no tools by itself.</p>
-    <p><b>Step 1 · Node:</b> ${nodeRow}</p>
-    <div class="row">${nodeBtn}
-      <button class="${d.node_found?'act':'ghost'}" onclick="setupPw()" ${d.node_found?'':'disabled'}>Step 2 · Configure MCP (Playwright + Skills)</button>
-    </div>
-    <p>Config: <code>${esc(d.config_path)}</code> · Playwright: ${d.playwright_configured?'<span class="ok">configured</span>':'<span class="err">not configured</span>'} · Skills MCP: ${skillsRow}</p>
-    <p class="mut" style="margin-top:6px">${esc(d.note)} Test in a normal chat: “use playwright to open example.com”.</p>
-    <p class="mut" style="margin-top:6px"><b>Auto-delivery:</b> the Skills MCP server lets a chat pull your distilled skills live (tool <code>get_skill</code>). Configure once + restart once; after that just record — new skills become available with <b>no restart</b>. Try: “call get_skill for google flights, then …”.</p>
-    <details style="margin-top:8px"><summary class="mut">Manual snippet</summary><pre>${esc(JSON.stringify(d.snippet,null,2))}</pre></details></div>`;
-}
-window.installNode = async ()=>{ toast('Downloading Node… (~30s)'); try{ const r=await api('/api/desktop/install-node',{method:'POST'}); toast('Node ready: '+(r.version||r.npx)); refresh(); }catch(e){ toast(e.message,true);} };
-window.setupPw = async ()=>{ try{ const r=await api('/api/desktop/playwright',{method:'POST'}); toast(r.message); refresh(); }catch(e){ toast(e.message,true);} };
-
-// ── Extension (record tasks) ──────────────────────────────────────────────────
-async function tabExt(){
-  const d = await api('/api/ext');
-  main.innerHTML = `<div class="card"><h2>Browser extension (the recorder)</h2>
-    <p class="mut">Chrome only allows true one-click installs from its Web Store. Until we publish there it's a 3-click "Load unpacked" — these buttons do the fiddly parts.</p>
-    <div class="row" style="margin:10px 0">
-      <button class="act" onclick="extOpenChrome()">1 · Open chrome://extensions</button>
-      <button class="ghost" onclick="extReveal()">2 · Reveal the extension folder</button>
-    </div>
-    <ol>${(d.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
-    <p class="mut" style="font-size:12px">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>
-    <p class="mut" style="font-size:12px">It auto-connects to this app once loaded. Re-do only after updating the app.</p></div>`;
-}
-window.extOpenChrome = async ()=>{ try{ await api('/api/ext/open-chrome',{method:'POST'}); toast('Opened chrome://extensions — turn on Developer mode (top-right)'); }catch(e){ toast(e.message,true);} };
-window.extReveal = async ()=>{ try{ const r=await api('/api/ext/reveal',{method:'POST'}); toast('Folder opened in Finder — pick it in "Load unpacked"'); }catch(e){ toast(e.message,true);} };
-
-// ── Settings ──────────────────────────────────────────────────────────────────
+// ── Settings (server key + LLM + Claude Desktop toggle + extension) ──────────
 async function tabSettings(){
-  const c = await api('/api/config');
-  main.innerHTML = `<div class="card"><h2>Settings</h2>
+  // Server key first — it needs NO auth, so it stays editable even if the key is
+  // wrong (recovery). Everything below is loaded after and may fail independently.
+  main.innerHTML = `
+    <div class="card"><h2>Server key</h2>
+      <p class="mut">Access key for this control panel (sent as a Bearer token to the local server).</p>
+      <input id="s_serverkey" type="password" value="${esc(API_KEY)}" placeholder="jfl-local-dev-key" />
+      <div class="row" style="margin-top:10px"><button class="act" onclick="saveServerKey()">Apply key</button></div>
+    </div>
+    <div id="cfg_llm" class="card"><p class="mut">Loading LLM settings…</p></div>
+    <div id="cfg_desktop" class="card"><p class="mut">Loading Claude Desktop status…</p></div>
+    <div id="cfg_ext" class="card"><p class="mut">Loading extension status…</p></div>`;
+  renderLlmSettings();
+  renderDesktop();
+  renderExtension();
+}
+window.saveServerKey = ()=>{ API_KEY=$('#s_serverkey').value.trim(); localStorage.setItem('jfl_api_key',API_KEY); toast('Server key applied'); refresh(); };
+
+async function renderLlmSettings(){
+  let c; try{ c = await api('/api/config'); }
+  catch(e){ $('#cfg_llm').innerHTML=`<h2>LLM</h2><span class="err">${esc(e.message)}</span><p class="mut">If this is an auth error, fix the Server key above and Apply.</p>`; return; }
+  $('#cfg_llm').innerHTML = `<h2>LLM &amp; distillation</h2>
     <label>LLM API key ${c.llm_key_set?'<span class="ok">(set)</span>':'<span class="err">(not set — distillation will fail)</span>'}</label>
     <input id="s_key" type="password" placeholder="sk-ant-… (leave blank to keep current)" />
     <label>LLM base URL</label><input id="s_base" type="text" value="${esc(c.llm_base)}" />
@@ -202,7 +182,7 @@ async function tabSettings(){
     <label>Skills root (Claude Code install target)</label><input id="s_root" type="text" value="${esc(c.skills_root)}" />
     <label><input id="s_auto" type="checkbox" ${c.auto_distill?'checked':''} style="width:auto;margin-right:6px"/> Auto-process on finalize</label>
     <label><input id="s_insecure" type="checkbox" ${c.llm_insecure?'checked':''} style="width:auto;margin-right:6px"/> Allow insecure TLS (self-signed / corporate-proxy LLM endpoint)</label>
-    <div class="row" style="margin-top:14px"><button class="act" onclick="saveSettings()">Save</button></div></div>`;
+    <div class="row" style="margin-top:14px"><button class="act" onclick="saveSettings()">Save</button></div>`;
 }
 window.saveSettings = async ()=>{
   const body={
@@ -212,7 +192,57 @@ window.saveSettings = async ()=>{
     min_bucket_size:parseInt($('#s_minbucket').value,10)||1,
   };
   const k=$('#s_key').value; if(k) body.llm_key=k;
-  try{ await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Saved'); refresh(); }catch(e){ toast(e.message,true);} };
+  try{ await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Saved'); renderLlmSettings(); }catch(e){ toast(e.message,true);} };
+
+// ── Claude Desktop connection (toggle, incl. Node/npx check) ──────────────────
+async function renderDesktop(){
+  let d; try{ d = await api('/api/desktop/config'); }
+  catch(e){ $('#cfg_desktop').innerHTML=`<h2>Claude Desktop</h2><span class="err">${esc(e.message)}</span>`; return; }
+  const connected = d.playwright_configured && d.skills_mcp_configured;
+  const nodeRow = d.node_found
+    ? `<span class="ok">Node ${esc(d.node_version||'')}</span> · <code>${esc(d.npx_path||'')}</code>`
+    : `<span class="err">Node / npx not found</span> — required to drive the browser`;
+  const nodeBtn = d.node_found ? '' : `<button class="act" onclick="installNode()">Install Node (one-click)</button>`;
+  // Toggle is disabled when Node is missing AND not yet connected (can't enable).
+  const canToggle = d.node_found || connected;
+  $('#cfg_desktop').innerHTML = `<h2>Claude Desktop connection</h2>
+    <p class="mut">Connect so Claude Desktop can drive the browser (Playwright) and pull your distilled skills live via the <code>get_skill</code> tool. Records still work without this — it only affects execution.</p>
+    <p><b>Node:</b> ${nodeRow}</p>
+    ${nodeBtn?`<div class="row" style="margin:6px 0">${nodeBtn}</div>`:''}
+    <div class="toggle-row">
+      <label class="sw"><input type="checkbox" id="s_mcp" ${connected?'checked':''} ${canToggle?'':'disabled'} onchange="toggleMcp(this.checked)"><span class="sl"></span></label>
+      <div><b>${connected?'Connected':'Not connected'}</b>
+        <div class="mut" style="font-size:11px">Playwright: ${d.playwright_configured?'<span class="ok">on</span>':'off'} · Skills MCP: ${d.skills_mcp_configured?'<span class="ok">on</span>':'off'}</div></div>
+    </div>
+    <p class="mut" style="font-size:12px">Config: <code>${esc(d.config_path)}</code></p>
+    <p class="mut" style="font-size:12px"><b>Restart Claude Desktop once</b> after toggling. After that, new skills you record are served live — no further restarts. Test: “call get_skill for google flights, then …”.</p>
+    <details style="margin-top:8px"><summary class="mut">Manual snippet</summary><pre>${esc(JSON.stringify(d.snippet,null,2))}</pre></details>`;
+}
+window.installNode = async ()=>{ toast('Downloading Node… (~30s)'); try{ const r=await api('/api/desktop/install-node',{method:'POST'}); toast('Node ready: '+(r.version||r.npx)); renderDesktop(); }catch(e){ toast(e.message,true);} };
+window.toggleMcp = async (on)=>{
+  try{
+    if(on){ const r=await api('/api/desktop/playwright',{method:'POST'}); toast(r.message); }
+    else { const r=await api('/api/desktop/disconnect',{method:'POST'}); toast(r.message); }
+  }catch(e){ toast(e.message,true); }
+  renderDesktop();
+};
+
+// ── Extension management ──────────────────────────────────────────────────────
+async function renderExtension(){
+  let d; try{ d = await api('/api/ext'); }
+  catch(e){ $('#cfg_ext').innerHTML=`<h2>Extension</h2><span class="err">${esc(e.message)}</span>`; return; }
+  $('#cfg_ext').innerHTML = `<h2>Browser extension (the recorder)</h2>
+    <p class="mut">Chrome only allows true one-click installs from its Web Store. Until we publish there it's a 3-click "Load unpacked" — these buttons do the fiddly parts.</p>
+    <div class="row" style="margin:10px 0">
+      <button class="act" onclick="extOpenChrome()">1 · Open chrome://extensions</button>
+      <button class="ghost" onclick="extReveal()">2 · Reveal the extension folder</button>
+    </div>
+    <ol>${(d.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+    <p class="mut" style="font-size:12px">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>
+    <p class="mut" style="font-size:12px">It auto-connects to this app once loaded. Re-do only after updating the app.</p>`;
+}
+window.extOpenChrome = async ()=>{ try{ await api('/api/ext/open-chrome',{method:'POST'}); toast('Opened chrome://extensions — turn on Developer mode (top-right)'); }catch(e){ toast(e.message,true);} };
+window.extReveal = async ()=>{ try{ await api('/api/ext/reveal',{method:'POST'}); toast('Folder opened in Finder — pick it in "Load unpacked"'); }catch(e){ toast(e.message,true);} };
 
 refresh();
 setInterval(pingServer,8000);

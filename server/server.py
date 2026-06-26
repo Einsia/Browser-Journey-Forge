@@ -946,6 +946,37 @@ def api_desktop_playwright(authorization: str = Header(None)):
     }
 
 
+@app.post("/api/desktop/disconnect")
+def api_desktop_disconnect(authorization: str = Header(None)):
+    """Remove our MCP servers (playwright + journey-forge-skills) from Claude
+    Desktop's config — the reverse of /api/desktop/playwright, so the panel can
+    offer a toggle. Backs up the config first."""
+    _check_auth(authorization)
+    cfg_path = _claude_desktop_config_path()
+    if not cfg_path.exists():
+        return {"ok": True, "removed": [], "restart_required": False,
+                "message": "No Claude Desktop config; nothing to disconnect."}
+    try:
+        data = json.loads(cfg_path.read_text())
+    except json.JSONDecodeError:
+        raise HTTPException(422, f"{cfg_path} is not valid JSON; fix or remove it first")
+    servers = data.get("mcpServers") or {}
+    removed = [n for n in ("playwright", "journey-forge-skills") if n in servers]
+    if removed:
+        shutil.copy2(cfg_path, cfg_path.with_suffix(cfg_path.suffix + ".jfl.bak"))
+        for n in removed:
+            del servers[n]
+        data["mcpServers"] = servers
+        _atomic_write(cfg_path, json.dumps(data, indent=2, ensure_ascii=False))
+        logger.info("[desktop] disconnected MCP %s from %s", removed, cfg_path)
+    return {
+        "ok": True,
+        "removed": removed,
+        "restart_required": bool(removed),
+        "message": "Disconnected from Claude Desktop. Restart Claude Desktop to apply.",
+    }
+
+
 # ── Static control panel (mounted last so /api & /v1 win) ────────────────────
 @app.get("/")
 def index():
