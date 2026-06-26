@@ -7,31 +7,37 @@
 <style>
   :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--mut:#9aa3b2;--acc:#5b8cff;--ok:#3ecf8e;--warn:#e0b341;--err:#e0584b}
   *{box-sizing:border-box}
-  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);min-width:760px}
   header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px}
+  header .inner,nav .inner{max-width:1000px;margin:0 auto;width:100%;display:flex;align-items:center;gap:14px}
   header h1{font-size:16px;margin:0;font-weight:650}
   header .sp{flex:1}
   .keybox{display:flex;gap:6px;align-items:center;color:var(--mut)}
   .keybox input{width:190px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:5px 8px;border-radius:6px}
-  nav{display:flex;gap:4px;padding:10px 20px 0}
+  nav{padding:10px 20px 0}
+  nav .inner{gap:4px}
   nav button{background:none;border:none;color:var(--mut);padding:8px 14px;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px}
   nav button.on{color:var(--fg);background:var(--panel)}
-  main{padding:18px 20px;max-width:1100px}
+  main{padding:18px 20px;max-width:1000px;margin:0 auto}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
-  .card h2{margin:0 0 4px;font-size:14px}
-  .site h3{margin:14px 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}
+  .card h2{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--fg)}   /* section heading */
+  .sub{font-size:13px;font-weight:600;color:var(--fg);margin:14px 0 6px}    /* sub-heading */
+  .card p{font-size:12px;line-height:1.5;margin:6px 0}                      /* body */
+  .meta{color:var(--mut);font-size:12px;margin:4px 0}                       /* small meta = body size */
+  .site h3{margin:14px 0 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
   .site h3 .dom{font-family:ui-monospace,Menlo,monospace}
-  table{width:100%;border-collapse:collapse}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-  th{color:var(--mut);font-weight:550;font-size:12px}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle;word-break:break-word}
+  th{color:var(--mut);font-weight:600;font-size:12px}
   .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;border:1px solid var(--line);white-space:nowrap}
   .pill.ok{color:var(--ok);border-color:var(--ok)} .pill.run{color:var(--warn);border-color:var(--warn)}
   .pill.err{color:var(--err);border-color:var(--err)} .pill.mut{color:var(--mut)}
   .cap{font-weight:600} .desc{color:var(--mut);font-size:12px;margin-top:2px}
-  button.act{background:var(--acc);border:none;color:#fff;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px}
-  button.ghost{background:none;border:1px solid var(--line);color:var(--fg);padding:6px 11px;border-radius:7px;cursor:pointer;font-size:12px}
+  button.act,button.ghost,button.danger{height:30px;padding:0 13px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;line-height:1;white-space:nowrap}
+  button.act{background:var(--acc);border:1px solid var(--acc);color:#fff}
+  button.ghost{background:none;border:1px solid var(--line);color:var(--fg)}
   button.danger{background:none;border:1px solid var(--err);color:var(--err)}
-  button:disabled{opacity:.5;cursor:default}
+  button:disabled{opacity:.45;cursor:default}
   label{display:block;color:var(--mut);font-size:12px;margin:10px 0 4px}
   input[type=text],input[type=password],select{width:100%;max-width:520px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:8px 10px;border-radius:7px}
   code,pre{font-family:ui-monospace,Menlo,monospace}
@@ -55,17 +61,24 @@
   .sw input:checked + .sl:before{transform:translateX(18px)}
   .sw input:disabled + .sl{opacity:.5;cursor:default}
   .toggle-row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .tip{position:relative;display:inline-block}
+  .tip .pop{display:none;position:absolute;right:0;top:calc(100% + 4px);width:240px;background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px;color:var(--fg);white-space:normal;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  .tip:hover .pop{display:block}
 </style>
 </head>
 <body>
 <header>
-  <h1>Journey-Forge&nbsp;Local</h1>
-  <span class="pill mut" id="srv">checking…</span>
-  <span class="pill mut" id="ver" title="running build">build …</span>
+  <div class="inner">
+    <h1>Journey-Forge&nbsp;Local</h1>
+    <span class="pill mut" id="srv">checking…</span>
+    <span class="pill mut" id="ver" title="running build">build …</span>
+  </div>
 </header>
 <nav>
-  <button data-tab="skills" class="on">Skills &amp; trajectories</button>
-  <button data-tab="settings">Settings</button>
+  <div class="inner">
+    <button data-tab="skills" class="on">Skills &amp; trajectories</button>
+    <button data-tab="settings">Settings</button>
+  </div>
 </nav>
 <main id="main"></main>
 <div class="toast" id="toast"></div>
@@ -106,21 +119,21 @@ async function tabSkills(){
   if(traj.trajectories.some(t=>t.distill_status==='running')) setTimeout(()=>{ if(TAB==='skills') tabSkills(); }, 1200);
 }
 function bucketsSection(d){
-  if(!d.domains.length) return `<div class="card"><h2>Distilled skills</h2><p class="mut">No skill buckets yet. Record a task with the extension and Process it — each capability becomes a skill under its website.</p></div>`;
+  if(!d.domains.length) return `<div class="card"><h2>Distilled skills</h2><p class="mut">No skills yet. Record a task with the extension — it distills automatically, and each capability becomes a skill under its website.</p></div>`;
   const sites = d.domains.map(site=>{
     const rows = site.buckets.map(b=>{
       const status = b.distilled ? `<span class="pill ok">distilled v${b.version}</span>` : `<span class="pill run">pending</span>`;
       const acts = b.distilled
         ? `<button class="ghost" onclick="viewSkill('${esc(b.bucket_id)}')">View SKILL.md</button>`
-        : `<span class="mut">awaiting distill</span>`;
+        : `<button class="ghost" disabled>View SKILL.md</button>`;
       return `<tr>
         <td><div class="cap">${esc(b.capacity)}</div><div class="desc">${esc(b.description||b.scope||'')}</div>
-            ${b.skill_name?`<div class="mut" style="font-size:11px">installed: ${esc(b.skill_name)}</div>`:''}</td>
-        <td>${b.segments}</td><td>${status}</td><td><div class="row">${acts}</div></td></tr>`;
+            ${b.skill_name?`<div class="meta">Installed: ${esc(b.skill_name)}</div>`:''}</td>
+        <td style="text-align:center">${b.segments}</td><td>${status}</td><td>${acts}</td></tr>`;
     }).join('');
     return `<div class="site"><h3><span class="dom">${esc(site.domain||'(unknown site)')}</span>
         <span class="pill mut">${site.buckets.length} capabilit${site.buckets.length===1?'y':'ies'}</span></h3>
-      <table><thead><tr><th>Capability</th><th>Segments</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      <table><thead><tr><th>Capability</th><th style="width:90px;text-align:center">Segments</th><th style="width:130px">Status</th><th style="width:160px"></th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }).join('');
   return `<div class="card"><h2>Distilled skills</h2>
     <p class="mut">Each website accumulates a bucket of capabilities. Every recorded task is atomized into segments, classified into a capability, and distilled into one reusable skill per capability.</p>
@@ -137,24 +150,26 @@ function progCell(t){
   const label=(PHASE_LABEL[p.phase]||p.phase)+frac;
   const full=label+(p.detail?` — ${p.detail}`:'');
   const running=t.distill_status==='running';
-  return `${pillHtml}<div class="mut" style="font-size:11px;margin-top:3px" title="${esc(full)}">${running?'<span class="spin-s"></span> ':''}${esc(label)}${p.detail?` · <span class="mut">${esc(p.detail.slice(0,28))}</span>`:''}</div>`;
+  // Pill in the cell; full progress detail in a hover popup (no inline text, so
+  // the row height stays stable and the table doesn't distort).
+  return `<span class="tip">${pillHtml}${running?' <span class="spin-s"></span>':''}<span class="pop">${esc(full)}</span></span>`;
 }
 function trajSection({trajectories}){
   const rows = trajectories.map(t=>{
-    const note = t.note ? `<div class="mut" style="font-size:11px;margin-top:3px;color:var(--warn)">${esc(t.note)}</div>` : '';
+    const note = t.note ? `<div class="meta" style="color:var(--warn);margin-top:3px">${esc(t.note)}</div>` : '';
     return `<tr>
       <td><strong>${esc(t.label||'(untitled)')}</strong><div class="desc">${esc(t.description||'')}</div>
-          <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div>${note}</td>
+          <div class="meta">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div>${note}</td>
       <td>${pill(t.status)}</td><td>${progCell(t)}</td>
       <td><button class="ghost" onclick="reprocess('${t.upload_id}')" ${t.distill_status==='running'?'disabled':''}>↻ Reprocess</button></td></tr>`;
   }).join('');
   return `<div class="card"><h2>Recorded trajectories</h2>
     <p class="mut">Every recording is processed automatically on finalize — atomized into segments, classified, and distilled. Hover the Pipeline cell for live detail. Use Reprocess to re-run if a recording was interrupted or the LLM gateway was down.</p>
-    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
+    ${trajectories.length?`<table><thead><tr><th>Task</th><th style="width:110px">Upload</th><th style="width:130px">Pipeline</th><th style="width:140px"></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
 }
 window.reprocess = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}); toast('Reprocessing…'); setTimeout(()=>{ if(TAB==='skills') tabSkills(); },800); }catch(e){ toast(e.message,true);} };
 
-// ── Settings (server key + LLM + Claude Desktop toggle + extension) ──────────
+// ── Settings (server key · LLM · agent connections · extension · logs) ───────
 async function tabSettings(){
   // Server key first — it needs NO auth, so it stays editable even if the key is
   // wrong (recovery). Everything below is loaded after and may fail independently.
@@ -165,23 +180,23 @@ async function tabSettings(){
       <div class="row" style="margin-top:10px"><button class="act" onclick="saveServerKey()">Apply key</button></div>
     </div>
     <div id="cfg_llm" class="card"><p class="mut">Loading LLM settings…</p></div>
-    <div id="cfg_desktop" class="card"><p class="mut">Loading Claude Desktop status…</p></div>
-    <div id="cfg_codex" class="card"><p class="mut">Loading Codex status…</p></div>
+    <div id="cfg_agents" class="card"><p class="mut">Loading agent connections…</p></div>
     <div id="cfg_ext" class="card"><p class="mut">Loading extension status…</p></div>
     <div id="cfg_logs" class="card">
       <div class="row" style="justify-content:space-between">
         <h2 style="margin:0">Logs</h2>
-        <div class="row"><label class="mut" style="margin:0"><input type="checkbox" id="log_auto" style="width:auto;margin-right:5px" onchange="toggleLogAuto(this.checked)">auto</label>
-          <button class="ghost" onclick="loadLogs()">Refresh</button></div>
+        <button class="ghost" onclick="loadLogs()">Refresh</button>
       </div>
-      <p class="mut" id="log_path" style="font-size:11px"></p>
+      <p class="meta" id="log_path"></p>
       <pre id="log_box" style="max-height:340px">loading…</pre>
     </div>`;
   renderLlmSettings();
-  renderDesktop();
-  renderCodex();
+  renderAgents();
   renderExtension();
   loadLogs();
+  // Logs auto-refresh by default while on Settings.
+  clearInterval(_logTimer);
+  _logTimer=setInterval(()=>{ if(TAB==='settings') loadLogs(); else clearInterval(_logTimer); }, 2000);
 }
 let _logTimer=null;
 window.loadLogs = async ()=>{
@@ -190,7 +205,6 @@ window.loadLogs = async ()=>{
     const p=$('#log_path'); if(p) p.textContent = r.path||'';
   }catch(e){ const box=$('#log_box'); if(box) box.textContent = e.message; }
 };
-window.toggleLogAuto = (on)=>{ clearInterval(_logTimer); if(on && TAB==='settings'){ _logTimer=setInterval(()=>{ if(TAB==='settings') loadLogs(); else clearInterval(_logTimer); }, 2000); } };
 window.saveServerKey = ()=>{ API_KEY=$('#s_serverkey').value.trim(); localStorage.setItem('jfl_api_key',API_KEY); toast('Server key applied'); refresh(); };
 
 async function renderLlmSettings(){
@@ -215,67 +229,54 @@ window.saveSettings = async ()=>{
   const k=$('#s_key').value; if(k) body.llm_key=k;
   try{ await api('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Saved'); renderLlmSettings(); }catch(e){ toast(e.message,true);} };
 
-// ── Claude Desktop connection (independent toggles, incl. Node/npx check) ─────
-async function renderDesktop(){
-  let d; try{ d = await api('/api/desktop/config'); }
-  catch(e){ $('#cfg_desktop').innerHTML=`<h2>Claude Desktop</h2><span class="err">${esc(e.message)}</span>`; return; }
+// ── Agent connections (Claude Desktop + Codex share Node + the two toggles) ──
+function agentBlock(title, d, kind){
+  if(!d) return `<div class="sub">${title}</div><p class="mut">unavailable (check the server key)</p>`;
   const pw = !!d.playwright_configured, sk = !!d.skills_mcp_configured;
-  const nodeRow = d.node_found
-    ? `<span class="ok">Node ${esc(d.node_version||'')}</span> · <code>${esc(d.npx_path||'')}</code>`
-    : `<span class="err">Node / npx not found</span> — required for browser control (Playwright)`;
-  const nodeBtn = d.node_found ? '' : `<button class="act" onclick="installNode()">Install Node (one-click)</button>`;
-  // Playwright needs Node; the skills server is our own binary, so it can be
-  // toggled regardless. Each toggle sets the desired state of BOTH servers.
   const pwToggleable = d.node_found || pw;
-  $('#cfg_desktop').innerHTML = `<h2>Claude Desktop connection</h2>
-    <p class="mut">Two independent integrations. Records still work without either — these only affect execution in Claude Desktop. <b>Restart Claude Desktop once</b> after changing a toggle.</p>
-    <p><b>Node:</b> ${nodeRow}</p>
-    ${nodeBtn?`<div class="row" style="margin:6px 0">${nodeBtn}</div>`:''}
+  const fn = kind==='claude' ? 'setMcp' : 'setCodexMcp';
+  return `
+    <div class="sub">${title}</div>
     <div class="toggle-row">
-      <label class="sw"><input type="checkbox" ${pw?'checked':''} ${pwToggleable?'':'disabled'} onchange="setMcp(this.checked, ${sk})"><span class="sl"></span></label>
-      <div><b>Browser control (Playwright MCP)</b> ${pw?'<span class="ok">on</span>':'<span class="mut">off</span>'}
-        <div class="mut" style="font-size:11px">Lets Claude Desktop click / type / navigate in a browser.</div></div>
+      <label class="sw"><input type="checkbox" ${pw?'checked':''} ${pwToggleable?'':'disabled'} onchange="${fn}(this.checked, ${sk})"><span class="sl"></span></label>
+      <div>Browser control (Playwright MCP) ${pw?'<span class="ok">on</span>':'<span class="mut">off</span>'}</div>
     </div>
     <div class="toggle-row">
-      <label class="sw"><input type="checkbox" ${sk?'checked':''} onchange="setMcp(${pw}, this.checked)"><span class="sl"></span></label>
-      <div><b>Distilled skills (get_skill MCP)</b> ${sk?'<span class="ok">on</span>':'<span class="mut">off</span>'}
-        <div class="mut" style="font-size:11px">Lets a chat pull your distilled skills live — record → auto-distill → available with no restart.</div></div>
+      <label class="sw"><input type="checkbox" ${sk?'checked':''} onchange="${fn}(${pw}, this.checked)"><span class="sl"></span></label>
+      <div>Distilled skills (get_skill MCP) ${sk?'<span class="ok">on</span>':'<span class="mut">off</span>'}</div>
     </div>
-    <p class="mut" style="font-size:12px">Config: <code>${esc(d.config_path)}</code></p>
-    <p class="mut" style="font-size:12px">Test in a chat: “call get_skill for google flights, then use playwright to …”.</p>
-    <details style="margin-top:8px"><summary class="mut">Manual snippet</summary><pre>${esc(JSON.stringify(d.snippet,null,2))}</pre></details>`;
+    <p class="meta">Config: <code>${esc(d.config_path)}</code>${d.config_exists===false?' (will be created)':''}</p>`;
 }
-window.installNode = async ()=>{ toast('Downloading Node… (~30s)'); try{ const r=await api('/api/desktop/install-node',{method:'POST'}); toast('Node ready: '+(r.version||r.npx)); renderDesktop(); renderCodex(); }catch(e){ toast(e.message,true);} };
+async function renderAgents(){
+  const el=$('#cfg_agents'); if(!el) return;
+  let cd=null, cx=null;
+  try{ cd = await api('/api/desktop/config'); }catch(e){}
+  try{ cx = await api('/api/codex/config'); }catch(e){}
+  if(!cd && !cx){ el.innerHTML=`<h2>Agent connections</h2><span class="err">Could not load agent status — check the server key.</span>`; return; }
+  const nodeFound = (cd&&cd.node_found) || (cx&&cx.node_found);
+  const nodeVer = (cd&&cd.node_version) || (cx&&cx.node_version) || '';
+  const npx = (cd&&cd.npx_path) || '';
+  const nodeRow = nodeFound
+    ? `<span class="ok">Node ${esc(nodeVer)}</span> <code>${esc(npx)}</code>`
+    : `<span class="err">Node / npx not found</span> — required for browser control (Playwright)`;
+  const nodeBtn = nodeFound ? '' : `<button class="act" onclick="installNode()">Install Node (one-click)</button>`;
+  el.innerHTML = `<h2>Agent connections</h2>
+    <p class="mut">Let an agent drive the browser (Playwright) and pull your distilled skills (get_skill). Recording works without this — it only affects execution. Restart the agent once after changing a toggle.</p>
+    <p class="meta">Node: ${nodeRow}</p>
+    ${nodeBtn?`<div class="row" style="margin:6px 0">${nodeBtn}</div>`:''}
+    ${agentBlock('Claude Desktop', cd, 'claude')}
+    ${agentBlock('Codex', cx, 'codex')}`;
+}
+window.installNode = async ()=>{ toast('Downloading Node… (~30s)'); try{ const r=await api('/api/desktop/install-node',{method:'POST'}); toast('Node ready: '+(r.version||r.npx)); renderAgents(); }catch(e){ toast(e.message,true);} };
 window.setMcp = async (playwright, skills)=>{
   try{ const r=await api('/api/desktop/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playwright,skills})}); toast(r.message); }
   catch(e){ toast(e.message,true); }
-  renderDesktop();
+  renderAgents();
 };
-
-// ── Codex connection (MCP via ~/.codex/config.toml — parallel to Claude) ──────
-async function renderCodex(){
-  let d; try{ d = await api('/api/codex/config'); }
-  catch(e){ const el=$('#cfg_codex'); if(el) el.innerHTML=`<h2>Codex</h2><span class="err">${esc(e.message)}</span>`; return; }
-  const el=$('#cfg_codex'); if(!el) return;
-  const pw = !!d.playwright_configured, sk = !!d.skills_mcp_configured;
-  const pwToggleable = d.node_found || pw;
-  el.innerHTML = `<h2>Codex connection</h2>
-    <p class="mut">Same two integrations for Codex (writes <code>~/.codex/config.toml</code>). <b>Restart Codex once</b> after changing a toggle. Records still work without this.</p>
-    ${d.node_found?'':'<p class="mut" style="font-size:12px"><span class="err">Node not found</span> — needed for browser control. Install it in the Claude Desktop section above.</p>'}
-    <div class="toggle-row">
-      <label class="sw"><input type="checkbox" ${pw?'checked':''} ${pwToggleable?'':'disabled'} onchange="setCodexMcp(this.checked, ${sk})"><span class="sl"></span></label>
-      <div><b>Browser control (Playwright MCP)</b> ${pw?'<span class="ok">on</span>':'<span class="mut">off</span>'}</div>
-    </div>
-    <div class="toggle-row">
-      <label class="sw"><input type="checkbox" ${sk?'checked':''} onchange="setCodexMcp(${pw}, this.checked)"><span class="sl"></span></label>
-      <div><b>Distilled skills (get_skill MCP)</b> ${sk?'<span class="ok">on</span>':'<span class="mut">off</span>'}</div>
-    </div>
-    <p class="mut" style="font-size:12px">Config: <code>${esc(d.config_path)}</code> ${d.config_exists?'':'(will be created)'}</p>`;
-}
 window.setCodexMcp = async (playwright, skills)=>{
   try{ const r=await api('/api/codex/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playwright,skills})}); toast(r.message); }
   catch(e){ toast(e.message,true); }
-  renderCodex();
+  renderAgents();
 };
 
 // ── Extension management ──────────────────────────────────────────────────────
@@ -289,8 +290,8 @@ async function renderExtension(){
       <button class="ghost" onclick="extReveal()">2 · Reveal the extension folder</button>
     </div>
     <ol>${(d.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
-    <p class="mut" style="font-size:12px">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>
-    <p class="mut" style="font-size:12px">It auto-connects to this app once loaded. Re-do only after updating the app.</p>`;
+    <p class="meta">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>
+    <p class="meta">It auto-connects to this app once loaded. Redo only after updating the app.</p>`;
 }
 window.extOpenChrome = async ()=>{ try{ await api('/api/ext/open-chrome',{method:'POST'}); toast('Opened chrome://extensions — turn on Developer mode (top-right)'); }catch(e){ toast(e.message,true);} };
 window.extReveal = async ()=>{ try{ await api('/api/ext/reveal',{method:'POST'}); toast('Folder opened in Finder — pick it in "Load unpacked"'); }catch(e){ toast(e.message,true);} };
