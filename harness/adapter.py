@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .event_utils import NormalizedEvent, registered_domain
+
+logger = logging.getLogger("journey_forge_local.adapter")
 
 
 @dataclass
@@ -280,5 +283,5 @@ def load_tracks(input_dir: Path) -> list[NormalizedTrack]:
             else:
                 tracks.append(load_human_track(p))
         except Exception as e:
-            print(f"[adapter] skip {p.name}: {e}")
+            logger.warning("adapter skip %s: %s", p.name, e)
     return tracks

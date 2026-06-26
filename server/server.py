@@ -71,12 +71,46 @@ APP_BUILD = Path(os.environ.get("JFL_APP_BUILD", str(REPO / "app" / "dist")))   
 EXT_BUILD = Path(os.environ.get("JFL_EXT_BUILD", str(REPO / "extension" / "dist" / "chrome-mv3")))  # wxt build
 
 # ── Logging ────────────────────────────────────────────────────────────────
+# Under GUI launch the sidecar's stdout is a pipe to the Tauri shell. If that
+# reader goes away, a bare print()/log write raises BrokenPipeError — which used
+# to crash the whole distill pipeline. Wrap stdout/stderr so writes can never
+# raise; the rotating FILE handler below is the durable log sink regardless.
+class _ResilientStream:
+    def __init__(self, s):
+        self._s = s
+
+    def write(self, data):
+        try:
+            return self._s.write(data)
+        except (BrokenPipeError, OSError, ValueError):
+            return len(data) if isinstance(data, (str, bytes)) else 0
+
+    def flush(self):
+        try:
+            self._s.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
+for _name in ("stdout", "stderr"):
+    _orig = getattr(sys, _name, None)
+    if _orig is not None:
+        try:
+            _orig.reconfigure(line_buffering=True)
+        except Exception:  # noqa: BLE001
+            pass
+        setattr(sys, _name, _ResilientStream(_orig))
+
+logging.raiseExceptions = False  # a logging handler error must never crash us
+
 # Always persist logs to a file under the data dir so they're visible even when
-# the app is launched normally (double-click) — no need to start it from a
-# terminal. The panel tails this file via GET /api/logs.
+# the app is launched normally (double-click). The panel tails it via /api/logs.
 LOG_DIR = DATA_DIR / "logs"
 LOG_FILE = LOG_DIR / "jfl-server.log"
-_log_handlers: list = [logging.StreamHandler()]
+_log_handlers: list = [logging.StreamHandler(sys.stdout)]
 try:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     from logging.handlers import RotatingFileHandler
@@ -88,12 +122,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
     handlers=_log_handlers,
 )
-# Line-buffer stdout so any remaining print() interleaves live in a terminal too.
-for _s in (sys.stdout, sys.stderr):
-    try:
-        _s.reconfigure(line_buffering=True)
-    except Exception:  # noqa: BLE001
-        pass
 logger = logging.getLogger("journey_forge_local")
 
 MAX_EVENT_CHUNK_BYTES = int(os.environ.get("JFL_MAX_EVENT_CHUNK_BYTES", 16 * 1024 * 1024))

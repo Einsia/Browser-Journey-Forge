@@ -132,7 +132,7 @@ async def _classify_one(
                 None, classify_segment_sync, seg, existing_capacities
             )
         except Exception as e:
-            print(f"[classifier] failed {seg.segment_id}: {e}")
+            logger.warning("classify failed for %s: %s", seg.segment_id, e)
             return None
 
 

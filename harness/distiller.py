@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,8 @@ from .classifier import ClassifiedSegment
 from .event_utils import host_path, registered_domain
 from .llm import call_llm, parse_json_from_model
 from . import config
+
+logger = logging.getLogger("journey_forge_local.distiller")
 
 
 @dataclass
@@ -181,4 +184,4 @@ def _write_skill(skill: DistilledSkill, segments: list[ClassifiedSegment]) -> No
             }
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    print(f"[distiller] wrote {skill_dir}")
+    logger.info("distiller wrote %s", skill_dir)

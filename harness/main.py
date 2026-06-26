@@ -114,10 +114,10 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         tracks = [t for t in all_tracks if t.track_id not in cp["ingested_tracks"]]
 
     if not tracks:
-        print("[ingest] no new tracks to process")
+        logger.info("ingest: no new tracks to process")
         return
 
-    print(f"[ingest] processing {len(tracks)} track(s)")
+    logger.info("ingest: processing %d track(s)", len(tracks))
 
     existing_buckets = load_buckets()
 
@@ -138,9 +138,9 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     for domain, segs in by_domain.items():
         existing_caps = get_domain_capacities(existing_buckets, domain)
         if existing_caps:
-            print(f"[ingest] {domain}: {len(segs)} segs, {len(existing_caps)} existing capacities")
+            logger.info("ingest %s: %d segs, %d existing capacities", domain, len(segs), len(existing_caps))
         else:
-            print(f"[ingest] {domain}: {len(segs)} segs (new domain)")
+            logger.info("ingest %s: %d segs (new domain)", domain, len(segs))
         classified = asyncio.run(
             classify_segments(segs, config.PARALLEL, existing_capacities=existing_caps)
         )
@@ -158,10 +158,10 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     ).isoformat()
 
     save_checkpoint(cp)
-    print(f"[ingest] done — {len(buckets)} buckets total")
+    logger.info("ingest done — %d buckets total", len(buckets))
 
     ready = [b for b in buckets.values() if b.dirty and len(b.segment_ids) >= config.MIN_BUCKET_SIZE]
-    print(f"[ingest] {len(ready)} bucket(s) ready for distillation")
+    logger.info("ingest: %d bucket(s) ready for distillation", len(ready))
 
 
 def cmd_distill(args: argparse.Namespace) -> None:
@@ -207,7 +207,7 @@ def cmd_distill(args: argparse.Namespace) -> None:
     progress.report("distill", total, total, "")
     save_buckets(buckets)
     save_checkpoint(cp)
-    print("[distill] done")
+    logger.info("distill done")
 
 
 def cmd_query(args: argparse.Namespace) -> None:
