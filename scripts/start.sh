@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Journey-Forge Local — dev fallback launcher (headless server, no desktop shell).
+# Journey Forge Local — dev fallback launcher (headless server, no desktop shell).
 # For the native window, use:  python entry/main.py
 set -euo pipefail
 

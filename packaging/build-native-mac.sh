@@ -44,7 +44,7 @@ echo "    sidecar → desktop/src-tauri/binaries/jfl-server-$TRIPLE"
 echo "[4/4] Building the Tauri app…"
 ( cd desktop && npm install && npm run tauri build )
 
-APP="desktop/src-tauri/target/release/bundle/macos/Journey-Forge Local.app"
+APP="desktop/src-tauri/target/release/bundle/macos/Journey Forge Local.app"
 # Re-sign the PyInstaller sidecar with library-validation disabled, otherwise
 # its embedded Python.framework (a different Team ID) fails to load under the
 # hardened runtime. Then re-seal the bundle over the new sidecar signature.
@@ -66,7 +66,7 @@ STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"      # drag-to-install affordance
 rm -f "$DMG"
-hdiutil create -volname "Journey-Forge Local" -srcfolder "$STAGE" \
+hdiutil create -volname "Journey Forge Local" -srcfolder "$STAGE" \
   -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
 

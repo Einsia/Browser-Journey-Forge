@@ -1,5 +1,5 @@
 #!/bin/bash
-# Journey-Forge Local — macOS .app launcher (Contents/MacOS/JourneyForgeLocal).
+# Journey Forge Local — macOS .app launcher (Contents/MacOS/JourneyForgeLocal).
 # Runs project code from the (read-only) bundle; keeps venv/data/config in a
 # writable Application Support dir. First run happens INSIDE a Terminal window so
 # setup progress is visible, and any failure shows a dialog instead of vanishing.
@@ -12,7 +12,7 @@ WORK="$HOME/Library/Application Support/JourneyForgeLocal" # writable state
 LOG="$WORK/launch.log"
 mkdir -p "$WORK"
 
-dialog() { /usr/bin/osascript -e "display dialog \"$1\" with title \"Journey-Forge Local\" buttons {\"OK\"} default button 1" >/dev/null 2>&1 || true; }
+dialog() { /usr/bin/osascript -e "display dialog \"$1\" with title \"Journey Forge Local\" buttons {\"OK\"} default button 1" >/dev/null 2>&1 || true; }
 
 # ── Re-launch inside Terminal.app on double-click, so setup is visible ─────────
 if [ -z "${JFL_IN_TERMINAL:-}" ] && ! [ -t 1 ]; then
@@ -29,7 +29,7 @@ fi
 # ── In Terminal from here on: visible, step-by-step ───────────────────────────
 exec > >(tee -a "$LOG") 2>&1
 echo "==================================================================="
-echo " Journey-Forge Local — starting"
+echo " Journey Forge Local — starting"
 echo " bundle : $RES"
 echo " state  : $WORK   (venv, data, .env.local, logs live here)"
 echo " $(date)"

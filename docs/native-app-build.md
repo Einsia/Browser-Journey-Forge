@@ -12,7 +12,7 @@ browser, no terminal, no venv, no system Python required by the end user.
 ## Architecture
 
 ```
-Journey-Forge Local.app
+Journey Forge Local.app
 └─ Tauri shell (Rust, native window)        desktop/src-tauri/
      └─ spawns sidecar  binaries/jfl-server-<triple>   (PyInstaller onefile)
             = packaging/sidecar_main.py
@@ -40,10 +40,10 @@ Journey-Forge Local.app
 bash packaging/build-native-mac.sh
 ```
 
-Output: `desktop/src-tauri/target/release/bundle/macos/Journey-Forge Local.app`
+Output: `desktop/src-tauri/target/release/bundle/macos/Journey Forge Local.app`
 
 First launch (unsigned): right-click → **Open** (or
-`xattr -dr com.apple.quarantine "Journey-Forge Local.app"`). Set your LLM key in
+`xattr -dr com.apple.quarantine "Journey Forge Local.app"`). Set your LLM key in
 the app's Settings; recordings then distill into per-site capability skills.
 
 ## Likely first-build fixes (I authored this blind — can't compile Rust/PyInstaller from Linux)

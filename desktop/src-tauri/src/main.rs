@@ -1,4 +1,4 @@
-// Journey-Forge Local — Tauri shell.
+// Journey Forge Local — Tauri shell.
 // Spawns the bundled Python sidecar (FastAPI server + distill pipeline), waits
 // for it to listen, then points the native window at the local control panel.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -66,5 +66,5 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Journey-Forge Local");
+        .expect("error while running Journey Forge Local");
 }

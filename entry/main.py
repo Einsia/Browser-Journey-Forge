@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Journey-Forge Local — desktop entry point.
+"""Journey Forge Local — desktop entry point.
 
 Starts the local server (server/server.py) on a background thread, then opens
 the control panel in the system browser. Port selection is resilient:
@@ -56,7 +56,7 @@ def _is_our_server(port: int) -> bool:
     """True if something on this port is *our* control panel (safe to reuse)."""
     try:
         with _OPENER.open(f"http://127.0.0.1:{port}/", timeout=1.5) as r:  # noqa: S310
-            return b"Journey-Forge" in r.read(4096)
+            return b"Journey Forge" in r.read(4096)
     except Exception:  # noqa: BLE001
         return False
 
@@ -107,7 +107,7 @@ def _open_panel(keep_alive: bool = True) -> None:
     if keep_alive and os.environ.get("JFL_USE_PYWEBVIEW") == "1":
         try:
             import webview  # pywebview
-            webview.create_window("Journey-Forge Local", URL, width=1200, height=820)
+            webview.create_window("Journey Forge Local", URL, width=1200, height=820)
             webview.start()
             return
         except Exception as e:  # noqa: BLE001
@@ -132,7 +132,7 @@ def main() -> int:
     if _is_our_server(PREFERRED_PORT):
         PORT = PREFERRED_PORT
         URL = f"http://127.0.0.1:{PORT}/"
-        print(f"\n[entry] Journey-Forge Local is already running at {URL} — opening it.\n")
+        print(f"\n[entry] Journey Forge Local is already running at {URL} — opening it.\n")
         _open_panel(keep_alive=False)
         return 0
 
@@ -145,7 +145,7 @@ def main() -> int:
         return 1
 
     print("\n" + "=" * 64)
-    print(f"  Journey-Forge Local is running:  {URL}")
+    print(f"  Journey Forge Local is running:  {URL}")
     if PORT != PREFERRED_PORT:
         print(f"  NOTE: port {PREFERRED_PORT} was busy, so we used {PORT}.")
         print(f"        The extension is preset to :{PREFERRED_PORT} — update its")

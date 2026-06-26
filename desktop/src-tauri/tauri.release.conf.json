@@ -1,6 +1,7 @@
 {
   "bundle": {
     "createUpdaterArtifacts": true,
+    "targets": ["app", "dmg"],
     "macOS": {
       "signingIdentity": "Developer ID Application: Houde Qian (F3D2L9HSSK)",
       "entitlements": "entitlements.plist"

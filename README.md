@@ -1,4 +1,4 @@
-# Journey-Forge Local
+# Journey Forge Local
 
 Record your own browser tasks → each website accumulates a **bucket of
 capabilities**, and every capability distills into one reusable skill → use them

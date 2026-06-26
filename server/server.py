@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Journey-Forge Local — minimal local ingestion + control server.
+"""Journey Forge Local — minimal local ingestion + control server.
 
 A single-user, ClawBench-agnostic server for the local product:
 
@@ -130,7 +130,7 @@ _VALID_CHUNK_KINDS = {"events", "media"}
 _UPLOAD_ID_RE = re.compile(r"upl_[0-9a-f]{12}$")
 _NAME_RE = re.compile(r"[A-Za-z0-9._-]+$")
 
-app = FastAPI(title="Journey-Forge Local")
+app = FastAPI(title="Journey Forge Local")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
@@ -1272,7 +1272,7 @@ def index():
     idx = APP_BUILD / "index.html"
     if idx.exists():
         return FileResponse(idx, headers=_NOCACHE)
-    return JSONResponse({"ok": True, "msg": "Journey-Forge Local server running. "
+    return JSONResponse({"ok": True, "msg": "Journey Forge Local server running. "
                          "Build the control panel (app/) to see the UI."})
 
 

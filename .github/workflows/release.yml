@@ -88,7 +88,7 @@ jobs:
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
-          releaseName: "Journey-Forge Local ${{ github.ref_name }}"
+          releaseName: "Journey Forge Local ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

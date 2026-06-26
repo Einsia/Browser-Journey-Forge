@@ -75,7 +75,7 @@ release:
     - echo "Publishing release $CI_COMMIT_TAG"
   release:
     tag_name: "$CI_COMMIT_TAG"
-    name: "Journey-Forge Local $CI_COMMIT_TAG"
+    name: "Journey Forge Local $CI_COMMIT_TAG"
     description: "Automated build. Download the macOS app below."
     assets:
       links:

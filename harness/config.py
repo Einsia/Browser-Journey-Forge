@@ -1,4 +1,4 @@
-"""Configuration for the Journey-Forge Local distillation harness.
+"""Configuration for the Journey Forge Local distillation harness.
 
 All values come from the environment (the server passes SF_*/JFL_* through when
 it spawns the harness), so there is no .env parsing here.
