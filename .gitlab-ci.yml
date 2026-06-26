@@ -48,13 +48,11 @@ build-native-mac:
     - cargo --version; node -v; python3 --version
     - bash packaging/build-native-mac.sh
     - mkdir -p out
-    - cd "desktop/src-tauri/target/release/bundle/macos"
-    - zip -r -y "$CI_PROJECT_DIR/out/JourneyForgeLocal-native-mac.zip" "Journey-Forge Local.app"
-    - cd "$CI_PROJECT_DIR"
-    - ls -lh out/JourneyForgeLocal-native-mac.zip
+    - cp "desktop/src-tauri/target/release/bundle/macos/JourneyForgeLocal-native-mac.dmg" out/
+    - ls -lh out/JourneyForgeLocal-native-mac.dmg
   artifacts:
     name: "JourneyForgeLocal-native-$CI_COMMIT_SHORT_SHA"
-    paths: ["out/JourneyForgeLocal-native-mac.zip"]
+    paths: ["out/JourneyForgeLocal-native-mac.dmg"]
     expire_in: 12 weeks
   rules:
     - if: '$CI_COMMIT_BRANCH == "master"'
@@ -81,7 +79,7 @@ release:
     description: "Automated build. Download the macOS app below."
     assets:
       links:
-        - name: "Native macOS .app (self-contained) — JourneyForgeLocal-native-mac.zip"
-          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/out/JourneyForgeLocal-native-mac.zip?job=build-native-mac"
+        - name: "Native macOS app (self-contained .dmg) — JourneyForgeLocal-native-mac.dmg"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/out/JourneyForgeLocal-native-mac.dmg?job=build-native-mac"
         - name: "Wrapper .app (needs Python on the Mac) — JourneyForgeLocal-mac.zip"
           url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/out/JourneyForgeLocal-mac.zip?job=build-app"

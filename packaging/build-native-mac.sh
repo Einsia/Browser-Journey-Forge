@@ -50,6 +50,20 @@ if [ -n "$SIDECAR" ]; then
   codesign --verify --deep --strict "$APP" && echo "codesign verify OK" || echo "WARN: codesign verify failed"
 fi
 
+# Package the (re-signed) .app into a .dmg so the download is a single
+# double-clickable installer — no nested zip-inside-zip. Built AFTER re-signing
+# so the app inside the image carries the correct signature.
+DMG="$(dirname "$APP")/JourneyForgeLocal-native-mac.dmg"
+echo "[5/5] Creating DMG → $DMG"
+STAGE="$(mktemp -d)"
+cp -R "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"      # drag-to-install affordance
+rm -f "$DMG"
+hdiutil create -volname "Journey-Forge Local" -srcfolder "$STAGE" \
+  -ov -format UDZO "$DMG"
+rm -rf "$STAGE"
+
 echo
-echo "Done. The .app is under:"
-echo "  $APP"
+echo "Done."
+echo "  .app: $APP"
+echo "  .dmg: $DMG"

@@ -99,14 +99,16 @@ def _default_config() -> dict:
         # consolidation. Blank → reuse distill_model (a custom gateway may not
         # serve a separate Haiku-class model).
         "classify_model": os.environ.get("SF_CLASSIFY_MODEL", ""),
-        # Skip TLS verification for self-signed / corporate-MITM LLM endpoints.
-        "llm_insecure": os.environ.get("SF_LLM_INSECURE", "").lower() in ("1", "true", "yes"),
+        # Always skip TLS verification — the product's LLM gateway uses a
+        # self-signed / corporate-MITM chain. Not user-configurable.
+        "llm_insecure": True,
         # A capability bucket distills once it has at least this many segments.
         "min_bucket_size": int(os.environ.get("SF_MIN_BUCKET_SIZE", "1")),
         # global ~/.claude/skills  OR  an absolute project path's .claude/skills
         # (empty env value falls back to the global default)
         "skills_root": os.environ.get("JFL_SKILLS_ROOT") or str(Path.home() / ".claude" / "skills"),
-        "auto_distill": os.environ.get("JFL_AUTODISTILL", "1") not in ("0", "false", ""),
+        # Recording always auto-processes on finalize. Not user-configurable.
+        "auto_distill": True,
     }
 
 
@@ -338,11 +340,11 @@ async def finalize_trace(upload_id: str, request: Request, authorization: str = 
     with update_meta(upload_id) as meta:
         meta["status"] = "accepted"
 
-    if _load_config().get("auto_distill"):
-        with update_meta(upload_id) as meta:
-            meta["distill_status"] = "running"
-        threading.Thread(target=_ingest_distill_install, args=(upload_id,), daemon=True).start()
-        logger.info("[finalize] %s: auto-distill started", upload_id)
+    # Recording always auto-processes — no manual "Process" step.
+    with update_meta(upload_id) as meta:
+        meta["distill_status"] = "running"
+    threading.Thread(target=_ingest_distill_install, args=(upload_id,), daemon=True).start()
+    logger.info("[finalize] %s: auto-distill started", upload_id)
 
     return {"status": "accepted", "trace_id": trace_id}
 
@@ -415,7 +417,7 @@ def _apply_harness_config(cfg: dict) -> None:
     hconfig.LLM_KEY = cfg.get("llm_key", "")
     if cfg.get("llm_base"):
         hconfig.LLM_BASE = str(cfg["llm_base"]).rstrip("/")
-    hconfig.LLM_INSECURE = bool(cfg.get("llm_insecure"))
+    hconfig.LLM_INSECURE = True  # always — gateway uses a self-signed chain
     hconfig.MIN_BUCKET_SIZE = int(cfg.get("min_bucket_size") or 1)
     model = cfg.get("distill_model")
     if model:
@@ -648,9 +650,9 @@ async def api_config_put(request: Request, authorization: str = Header(None)):
     for k in ("llm_base", "distill_model", "classify_model", "skills_root"):
         if k in body:
             cfg[k] = body[k]
-    for k in ("auto_distill", "llm_insecure"):
-        if k in body:
-            cfg[k] = bool(body[k])
+    # auto_distill and llm_insecure are always-on, not user-configurable.
+    cfg["auto_distill"] = True
+    cfg["llm_insecure"] = True
     if "min_bucket_size" in body:
         try:
             cfg["min_bucket_size"] = max(1, int(body["min_bucket_size"]))

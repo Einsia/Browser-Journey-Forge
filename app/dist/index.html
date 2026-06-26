@@ -24,7 +24,7 @@
   table{width:100%;border-collapse:collapse}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   th{color:var(--mut);font-weight:550;font-size:12px}
-  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;border:1px solid var(--line)}
+  .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;border:1px solid var(--line);white-space:nowrap}
   .pill.ok{color:var(--ok);border-color:var(--ok)} .pill.run{color:var(--warn);border-color:var(--warn)}
   .pill.err{color:var(--err);border-color:var(--err)} .pill.mut{color:var(--mut)}
   .cap{font-weight:600} .desc{color:var(--mut);font-size:12px;margin-top:2px}
@@ -109,7 +109,7 @@ function bucketsSection(d){
     const rows = site.buckets.map(b=>{
       const status = b.distilled ? `<span class="pill ok">distilled v${b.version}</span>` : `<span class="pill run">pending</span>`;
       const acts = b.distilled
-        ? `<button class="ghost" onclick="viewSkill('${esc(b.bucket_id)}')">View SKILL.md</button> <button class="ghost" onclick="dlSkillZip('${esc(b.bucket_id)}')">Desktop .zip</button>`
+        ? `<button class="ghost" onclick="viewSkill('${esc(b.bucket_id)}')">View SKILL.md</button>`
         : `<span class="mut">awaiting distill</span>`;
       return `<tr>
         <td><div class="cap">${esc(b.capacity)}</div><div class="desc">${esc(b.description||b.scope||'')}</div>
@@ -125,7 +125,6 @@ function bucketsSection(d){
     ${sites}</div>`;
 }
 window.viewSkill = async (bucket)=>{ try{ const r=await api('/api/skill?bucket='+encodeURIComponent(bucket)); openModal(bucket, r.skill_md); }catch(e){ toast(e.message,true);} };
-window.dlSkillZip = async (bucket)=>{ try{ const r=await api('/api/skill/zip?bucket='+encodeURIComponent(bucket)); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=bucket.replace('::','-')+'.zip'; a.click(); URL.revokeObjectURL(u); toast('Downloaded. Upload it in Claude Desktop → Settings → Skills.'); }catch(e){ toast(e.message,true);} };
 
 const PHASE_LABEL={ingest:'Atomizing',classify:'Classifying',bucket:'Bucketing',distill:'Distilling',install:'Installing',done:'Done',error:'Error'};
 function progCell(t){
@@ -142,13 +141,11 @@ function trajSection({trajectories}){
   const rows = trajectories.map(t=>`<tr>
       <td><strong>${esc(t.label||'(untitled)')}</strong><div class="desc">${esc(t.description||'')}</div>
           <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div></td>
-      <td>${pill(t.status)}</td><td>${progCell(t)}</td>
-      <td><button class="act" onclick="distill('${t.upload_id}')">Process</button></td></tr>`).join('');
+      <td>${pill(t.status)}</td><td>${progCell(t)}</td></tr>`).join('');
   return `<div class="card"><h2>Recorded trajectories</h2>
-    <p class="mut">"Process" ingests the trajectory into the capability buckets and distills any that are ready. Hover the Pipeline cell for live detail.</p>
-    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
+    <p class="mut">Every recording is processed automatically on finalize — atomized into segments, classified, and distilled. Hover the Pipeline cell for live detail.</p>
+    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
 }
-window.distill = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}); toast('Pipeline started'); setTimeout(refresh,1200);}catch(e){toast(e.message,true);} };
 
 // ── Settings (server key + LLM + Claude Desktop toggle + extension) ──────────
 async function tabSettings(){
@@ -180,15 +177,12 @@ async function renderLlmSettings(){
     <label>Classify model (per-segment; blank = same as distill model)</label><input id="s_classify" type="text" value="${esc(c.classify_model||'')}" placeholder="blank = use distill model" />
     <label>Min bucket size (segments needed before a capability distills)</label><input id="s_minbucket" type="text" value="${esc(c.min_bucket_size||1)}" />
     <label>Skills root (Claude Code install target)</label><input id="s_root" type="text" value="${esc(c.skills_root)}" />
-    <label><input id="s_auto" type="checkbox" ${c.auto_distill?'checked':''} style="width:auto;margin-right:6px"/> Auto-process on finalize</label>
-    <label><input id="s_insecure" type="checkbox" ${c.llm_insecure?'checked':''} style="width:auto;margin-right:6px"/> Allow insecure TLS (self-signed / corporate-proxy LLM endpoint)</label>
     <div class="row" style="margin-top:14px"><button class="act" onclick="saveSettings()">Save</button></div>`;
 }
 window.saveSettings = async ()=>{
   const body={
     llm_base:$('#s_base').value, distill_model:$('#s_model').value,
     classify_model:$('#s_classify').value, skills_root:$('#s_root').value,
-    auto_distill:$('#s_auto').checked, llm_insecure:$('#s_insecure').checked,
     min_bucket_size:parseInt($('#s_minbucket').value,10)||1,
   };
   const k=$('#s_key').value; if(k) body.llm_key=k;
