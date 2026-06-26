@@ -48,8 +48,9 @@ def call_llm(
     max_tokens: int | None = None,
     json_mode: bool = True,
     timeout: float | None = None,
-    retries: int = 3,
+    retries: int | None = None,
 ) -> tuple[str, dict]:
+    retries = retries if retries is not None else config.LLM_RETRIES
     model = model or config.DISTILL_MODEL
     max_tokens = max_tokens or config.DISTILL_MAX_TOKENS
     timeout = timeout or config.LLM_TIMEOUT
@@ -123,7 +124,7 @@ def call_llm_fast(
         max_tokens=max_tokens or config.CLASSIFY_MAX_TOKENS,
         json_mode=True,
         timeout=90,
-        retries=3,
+        retries=config.LLM_RETRIES,
     )
 
 
@@ -149,9 +150,12 @@ def parse_json_from_model(text: str) -> dict:
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
     cleaned = re.sub(r"```$", "", cleaned).strip()
 
+    # strict=False allows literal control chars (raw newlines/tabs) inside JSON
+    # string values — distilled skills embed a multi-line SKILL.md body, which the
+    # model often returns pretty-printed rather than \n-escaped.
     for s in (cleaned, _escape_invalid_json_backslashes(cleaned)):
         try:
-            return json.loads(s)
+            return json.loads(s, strict=False)
         except json.JSONDecodeError:
             pass
 
@@ -161,7 +165,7 @@ def parse_json_from_model(text: str) -> dict:
         body = cleaned[start : end + 1]
         for s in (body, _escape_invalid_json_backslashes(body)):
             try:
-                return json.loads(s)
+                return json.loads(s, strict=False)
             except json.JSONDecodeError:
                 pass
 

@@ -181,26 +181,27 @@ def cmd_distill(args: argparse.Namespace) -> None:
         }
 
     if not targets:
-        print("[distill] no buckets ready for distillation")
+        logger.info("distill: no buckets ready")
         return
 
-    print(f"[distill] distilling {len(targets)} bucket(s)")
+    logger.info("distill: %d bucket(s) ready", len(targets))
     from . import progress
 
     total = len(targets)
     for idx, (bid, bucket) in enumerate(targets.items()):
         progress.report("distill", idx, total, f"{bucket.domain}::{bucket.canonical_capacity}")
         try:
-            print(f"  [{bucket.domain}] distilling '{bucket.canonical_capacity}' ({len(bucket.segment_ids)} segments)...")
+            logger.info("distilling %s::%s (%d segment(s))", bucket.domain,
+                        bucket.canonical_capacity, len(bucket.segment_ids))
             skill = distill_bucket_sync(bucket, segment_map)
             update_registry_entry(skill)
             bucket.distill_version += 1
             bucket.dirty = False
             bucket.last_distilled_at = skill.meta["distilled_at"]
             mark_bucket_distilled(cp, bid)
-            print(f"  ✓ {skill.skill_name}")
+            logger.info("distilled OK: %s", skill.skill_name)
         except Exception as e:
-            print(f"  ✗ {bid}: {e}")
+            logger.warning("distill FAILED %s: %s", bid, e)
             cp["pipeline"]["distill"]["failed"] += 1
 
     progress.report("distill", total, total, "")

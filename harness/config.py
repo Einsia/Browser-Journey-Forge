@@ -38,6 +38,10 @@ PARALLEL: int = int(os.environ.get("SF_PARALLEL", "4"))
 DISTILL_MAX_TOKENS: int = int(os.environ.get("DISTILL_MAX_TOKENS", "16384"))
 CLASSIFY_MAX_TOKENS: int = int(os.environ.get("CLASSIFY_MAX_TOKENS", "2048"))
 LLM_TIMEOUT: float = float(os.environ.get("SF_LLM_TIMEOUT", "180"))
+# Retries per LLM call. Some gateways load-balance across backends where one is
+# intermittently broken (e.g. a Bedrock deployment without Anthropic access →
+# sporadic 400s); generous retries ride over the flaky backend. Configurable.
+LLM_RETRIES: int = int(os.environ.get("SF_LLM_RETRIES", "6"))
 # Some gateways sit behind Cloudflare, which 403s the default "Python-urllib/x.y"
 # User-Agent (error 1010 — banned client signature). Send a normal browser UA so
 # the request is allowed (curl works for the same reason). Configurable.
