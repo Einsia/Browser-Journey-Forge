@@ -2,30 +2,30 @@ import { browser } from 'wxt/browser';
 import { downloadEventFromDelta, downloadEventFromItem } from '@/capture/download-events';
 import { createCaptchaProviderDedupe } from '@/capture/session-side-effects';
 import { shouldRecordBrowserNavigationUrl, tabNavigationEvent } from '@/capture/tab-navigation';
-import { getBrowserAdapter } from '@/browser';
-import { appendEvent, pauseCapture, resumeCapture, startRecording, stopRecording } from '@/recording/recorder';
+import {
+  appendEvent,
+  pauseCapture,
+  resumeCapture,
+  saveReviewMetadata,
+  startRecording,
+  stopRecording,
+} from '@/recording/recorder';
 import { errorMessage } from '@/shared/errors';
 import { createId } from '@/shared/id';
-import type { BlobRow, CaptchaProvider, CapturedEvent, CaptureSettings, RecordingRow, VideoChunkEvent } from '@/shared/types';
-import { db, getConfig } from '@/storage/db';
+import type { CaptchaProvider, CapturedEvent, CaptureSettings, RecordingRow } from '@/shared/types';
+import { db } from '@/storage/db';
 import { pollUploadStatus, uploadRecording } from '@/upload/runner';
-import { evaluateVideoStorageBudget } from '@/video/storage-policy';
-
-type VideoAnnotationType = 'video_started' | 'video_stopped' | 'video_failed' | 'video_degraded';
 
 type RuntimeMessage =
   | { type: 'get-active-recording' }
-  | { type: 'start-recording' }
-  | { type: 'start-task-recording'; caseId: string; siteUrl: string }
+  | { type: 'start-recording'; label?: string }
   | { type: 'pause-capture'; traceId?: string }
   | { type: 'resume-capture'; traceId?: string }
   | { type: 'stop-recording'; traceId?: string }
   | { type: 'event'; event: CapturedEvent }
   | { type: 'captcha-detected'; traceId?: string; triggerEventId: string; providers: CaptchaProvider[] }
   | { type: 'append-annotation'; traceId?: string; annotationType: 'captcha_solved' | 'captcha_blocked'; text?: string }
-  | { type: 'video-chunk'; traceId: string; tabId: number; url: string; blobKey: string; startTimestamp: number; endTimestamp: number; mimeType: string; data: ArrayBuffer }
-  | { type: 'open-dashboard'; hash?: string }
-  | { type: 'resume-upload'; traceId: string }
+  | { type: 'resume-upload'; traceId: string; label?: string }
   | { type: 'poll-upload-status'; traceId: string }
   | { type: 'delete-recording'; traceId: string };
 
@@ -46,47 +46,16 @@ const CONTENT_FLUSH_TIMEOUT_MS = 1500;
 const tabUrlCache = new Map<number, string>();
 const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
   screenshots: false,
-  video: true,
+  video: false,
   networkBodies: true
 };
-const VIDEO_RECORDER_URL = 'video-recorder.html';
-const VIDEO_CHUNK_TIMESLICE_MS = 5_000;
-const FIREFOX_VIDEO_FRAME_INTERVAL_MS = 1_000;
-const START_RECORDING_CONTEXT_MENU_ID = 'journey-forge-start-recording';
-const VIDEO_RECORDER_PORT_NAME = 'journey-forge-video-recorder';
-let activeVideoTraceId: string | null = null;
-let firefoxVideoRecorderTabId: number | null = null;
-let firefoxVideoRecorderPort: chrome.runtime.Port | null = null;
-let firefoxVideoRequestId = 0;
-const videoLimitReachedTraceIds = new Set<string>();
-const firefoxVideoReadyWaiters = new Set<() => void>();
-const firefoxVideoResponseWaiters = new Map<
-  string,
-  {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
-  }
->();
 
 export default defineBackground(() => {
   recovery = recoverActiveTraceId();
-  void registerContextMenu();
+  void refreshRecordingBadge();
 
   const listener = (message: unknown, sender: SenderLike) => handleMessage(message, sender);
   browser.runtime.onMessage.addListener(listener as Parameters<typeof browser.runtime.onMessage.addListener>[0]);
-  browser.runtime.onConnect.addListener((port) => {
-    handleVideoRecorderConnect(port as chrome.runtime.Port);
-  });
-  chrome.runtime.onInstalled?.addListener(() => {
-    void registerContextMenu();
-  });
-  chrome.runtime.onStartup?.addListener(() => {
-    void registerContextMenu();
-  });
-  chrome.contextMenus?.onClicked?.addListener((info, tab) => {
-    void handleContextMenuClicked(info, tab);
-  });
   browser.tabs.onCreated.addListener((tab) => {
     void handleTabCreated(tab);
   });
@@ -127,20 +96,7 @@ async function handleMessage(message: unknown, sender: SenderLike): Promise<unkn
     }
 
     case 'start-recording': {
-      const row = await beginRecording(recordingTargetFromSender(sender));
-      const captureSettings = await captureSettingsForActiveRecording(row.trace_id, row);
-      return { active: true, traceId: activeTraceId, recovered: false, captureSettings, capturePaused: false, row };
-    }
-
-    case 'start-task-recording': {
-      const tab = await chrome.tabs.create({ url: `https://${message.siteUrl}` });
-      const target: SenderLike['tab'] = {
-        ...(tab.id !== undefined ? { id: tab.id } : {}),
-        ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
-        ...(tab.url !== undefined ? { url: tab.url } : {}),
-        ...(tab.active !== undefined ? { active: tab.active } : {}),
-      };
-      const row = await beginRecording(target, { taskCaseId: message.caseId });
+      const row = await beginRecording(message.label);
       const captureSettings = await captureSettingsForActiveRecording(row.trace_id, row);
       return { active: true, traceId: activeTraceId, recovered: false, captureSettings, capturePaused: false, row };
     }
@@ -148,7 +104,6 @@ async function handleMessage(message: unknown, sender: SenderLike): Promise<unkn
     case 'pause-capture': {
       const traceId = message.traceId ?? activeTraceId;
       if (!traceId) return { active: false, traceId: null, capturePaused: false };
-      await stopVideoCapture(traceId);
       const row = await pauseCapture(traceId);
       const captureSettings = await captureSettingsForActiveRecording(traceId, row);
       await broadcastRecordingState(true, traceId, captureSettings, true);
@@ -160,7 +115,6 @@ async function handleMessage(message: unknown, sender: SenderLike): Promise<unkn
       if (!traceId) return { active: false, traceId: null, capturePaused: false };
       const row = await resumeCapture(traceId);
       const captureSettings = await captureSettingsForActiveRecording(traceId, row);
-      await startVideoCapture(traceId, captureSettings);
       await broadcastRecordingState(true, traceId, captureSettings, false);
       return { active: true, traceId, recovered: activeTraceRecovered, captureSettings, capturePaused: false, row };
     }
@@ -168,13 +122,13 @@ async function handleMessage(message: unknown, sender: SenderLike): Promise<unkn
     case 'stop-recording': {
       const traceId = message.traceId ?? activeTraceId;
       if (!traceId) return { active: false, traceId: null };
-      await stopVideoCapture(traceId);
       await flushRecordingTabs(traceId);
       const row = await stopRecording(traceId);
       captchaDedupe.clear(traceId);
       if (activeTraceId === traceId) activeTraceId = null;
       activeTraceRecovered = false;
       await broadcastRecordingState(false, null, null, false);
+      await refreshRecordingBadge();
       return { active: false, traceId: null, recovered: false, captureSettings: null, capturePaused: false, row };
     }
 
@@ -186,19 +140,13 @@ async function handleMessage(message: unknown, sender: SenderLike): Promise<unkn
     }
 
     case 'captcha-detected':
-      return await appendCaptchaDetected(message.traceId ?? activeTraceId, message.providers, message.triggerEventId, sender);
+      return await appendCaptchaDetected(message.traceId ?? activeTraceId, message.providers, sender);
 
     case 'append-annotation':
       return await appendAnnotation(message.traceId ?? activeTraceId, message.annotationType, message.text, sender);
 
-    case 'video-chunk':
-      return await persistVideoChunk(message);
-
-    case 'open-dashboard':
-      await getBrowserAdapter().openDashboard(message.hash ?? '');
-      return { ok: true };
-
     case 'resume-upload': {
+      await ensureUploadable(message.traceId, message.label);
       const row = await uploadRecording(message.traceId);
       return { ok: true, row };
     }
@@ -211,89 +159,45 @@ async function handleMessage(message: unknown, sender: SenderLike): Promise<unkn
     case 'delete-recording': {
       await deleteRecordingLocal(message.traceId);
       captchaDedupe.clear(message.traceId);
-      videoLimitReachedTraceIds.delete(message.traceId);
       if (activeTraceId === message.traceId) {
-        await stopVideoCapture(message.traceId);
         activeTraceId = null;
         activeTraceRecovered = false;
         await broadcastRecordingState(false, null, null, false);
+        await refreshRecordingBadge();
       }
       return { ok: true };
     }
   }
 }
 
-function recordingTargetFromSender(sender: SenderLike): SenderLike['tab'] {
-  return shouldRecordBrowserNavigationUrl(sender.tab?.url) ? sender.tab : undefined;
-}
-
-async function beginRecording(targetTab?: SenderLike['tab'], opts?: { taskCaseId?: string }): Promise<RecordingRow> {
-  const row = await startRecording(undefined, opts);
+async function beginRecording(label?: string): Promise<RecordingRow> {
+  const row = await startRecording(undefined, label ? { label } : undefined);
   activeTraceId = row.trace_id;
   activeTraceRecovered = false;
   const captureSettings = await captureSettingsForActiveRecording(activeTraceId, row);
-  await startVideoCapture(activeTraceId, captureSettings, targetTab);
   await broadcastRecordingState(true, activeTraceId, captureSettings, false);
+  await refreshRecordingBadge();
   return row;
 }
 
-async function registerContextMenu(): Promise<void> {
-  const contextMenus = chrome.contextMenus;
-  if (!contextMenus?.create) return;
-  await new Promise<void>((resolve) => {
-    contextMenus.remove(START_RECORDING_CONTEXT_MENU_ID, () => {
-      contextMenus.create(
-        {
-          id: START_RECORDING_CONTEXT_MENU_ID,
-          title: 'Start Journey Forge recording',
-          contexts: ['page', 'frame', 'selection', 'editable', 'link'],
-        },
-        () => resolve()
-      );
-    });
-  });
+// A just-stopped recording is `review_required`; the upload runner only accepts
+// queued/failed/paused. Move it to queued (with a label) before uploading.
+async function ensureUploadable(traceId: string, label?: string): Promise<void> {
+  const row = await db.recordings.get(traceId);
+  if (!row || row.status !== 'review_required') return;
+  const resolvedLabel = label?.trim() || row.envelope.label?.trim() || defaultLabel(row);
+  await saveReviewMetadata({ traceId, label: resolvedLabel });
 }
 
-async function handleContextMenuClicked(
-  info: chrome.contextMenus.OnClickData,
-  tab?: chrome.tabs.Tab
-): Promise<void> {
-  if (info.menuItemId !== START_RECORDING_CONTEXT_MENU_ID) return;
-  await ensureRecovered();
-  if (activeTraceId) {
-    await getBrowserAdapter().openDashboard(`#review=${encodeURIComponent(activeTraceId)}`);
-    return;
-  }
-  const config = await getConfig();
-  if (!config.endpoint_url.trim() || !config.api_key.trim()) {
-    await getBrowserAdapter().openDashboard('#settings');
-    return;
-  }
-  if (config.recording_mode === 'real_user_free_form' && !config.realUserConsentAccepted) {
-    await getBrowserAdapter().openDashboard('#settings');
-    return;
-  }
-  try {
-    await beginRecording(tabLike(tab));
-  } catch {
-    await getBrowserAdapter().openDashboard('#settings');
-  }
-}
-
-function tabLike(tab: chrome.tabs.Tab | undefined): SenderLike['tab'] {
-  if (!tab) return undefined;
-  return {
-    ...(tab.id !== undefined ? { id: tab.id } : {}),
-    ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
-    ...(tab.url !== undefined ? { url: tab.url } : {}),
-    ...(tab.active !== undefined ? { active: tab.active } : {}),
-  };
+function defaultLabel(row: RecordingRow): string {
+  const domain = row.envelope.summary.domains[0];
+  const stamp = new Date(row.created_at).toISOString().slice(0, 16).replace('T', ' ');
+  return domain ? `${domain} — ${stamp}` : `Recording ${stamp}`;
 }
 
 async function appendCaptchaDetected(
   traceId: string | null,
   providers: CaptchaProvider[],
-  _triggerEventId: string,
   sender: SenderLike
 ): Promise<{ ok: boolean; providers?: CaptchaProvider[]; error?: string }> {
   if (!traceId) return { ok: false, error: 'no active recording' };
@@ -356,385 +260,19 @@ async function appendAnnotation(
   return { ok: true };
 }
 
-async function startVideoCapture(
-  traceId: string,
-  captureSettings: CaptureSettings | null | undefined,
-  targetTab?: SenderLike['tab']
-): Promise<void> {
-  const adapter = getBrowserAdapter();
-  if (!captureSettings?.video || !adapter.capabilities.video) return;
-  if (videoLimitReachedTraceIds.has(traceId)) return;
-  const tab = targetTab?.id !== undefined ? targetTab : await videoCaptureTargetTab();
-  if (tab?.id === undefined || !shouldRecordBrowserNavigationUrl(tab.url)) {
-    await appendVideoAnnotation(traceId, 'video_failed', 'No recordable browser tab was available.');
-    return;
-  }
-
-  if (adapter.capabilities.browser === 'firefox') {
-    await startFirefoxVideoCapture(traceId, tab);
-    return;
-  }
-  if (!supportsChromeVideoCapture()) return;
-
+async function refreshRecordingBadge(): Promise<void> {
+  const action = chrome.action;
+  if (!action?.setBadgeText) return;
   try {
-    await ensureVideoOffscreenDocument();
-    const streamId = await getTabCaptureStreamId(tab.id);
-    const response = await sendVideoRecorderMessage<{ ok?: boolean; error?: string }>({
-      type: 'video-start',
-      traceId,
-      streamId,
-      tabId: tab.id,
-      url: tab.url ?? '',
-      timesliceMs: VIDEO_CHUNK_TIMESLICE_MS,
-    });
-    if (response?.ok) {
-      activeVideoTraceId = traceId;
-      await appendVideoAnnotation(traceId, 'video_started', 'tab_capture_started', tab.id, tab.url);
-      return;
+    if (activeTraceId) {
+      await action.setBadgeBackgroundColor({ color: '#e0584b' });
+      await action.setBadgeText({ text: '●' });
+    } else {
+      await action.setBadgeText({ text: '' });
     }
-    await appendVideoAnnotation(
-      traceId,
-      'video_failed',
-      response?.error ?? 'Video recorder did not start.',
-      tab.id,
-      tab.url
-    );
-  } catch (error) {
-    await appendVideoAnnotation(traceId, 'video_failed', errorMessage(error), tab.id, tab.url);
-    activeVideoTraceId = null;
-  }
-}
-
-async function startFirefoxVideoCapture(
-  traceId: string,
-  tab: NonNullable<SenderLike['tab']>
-): Promise<void> {
-  if (tab.id === undefined) {
-    await appendVideoAnnotation(traceId, 'video_failed', 'No recordable Firefox tab was available.');
-    return;
-  }
-
-  try {
-    await ensureFirefoxVideoRecorderTab();
-    const response = await sendVideoRecorderMessage<{ ok?: boolean; error?: string }>({
-      type: 'video-start-firefox',
-      traceId,
-      tabId: tab.id,
-      url: tab.url ?? '',
-      timesliceMs: VIDEO_CHUNK_TIMESLICE_MS,
-      frameIntervalMs: FIREFOX_VIDEO_FRAME_INTERVAL_MS,
-    });
-    if (response?.ok) {
-      activeVideoTraceId = traceId;
-      await appendVideoAnnotation(traceId, 'video_started', 'firefox_capture_tab_started', tab.id, tab.url);
-      return;
-    }
-    await appendVideoAnnotation(
-      traceId,
-      'video_failed',
-      response?.error ?? 'Firefox video recorder did not start.',
-      tab.id,
-      tab.url
-    );
-  } catch (error) {
-    await appendVideoAnnotation(traceId, 'video_failed', errorMessage(error), tab.id, tab.url);
-    activeVideoTraceId = null;
-  }
-}
-
-async function stopVideoCapture(traceId?: string): Promise<void> {
-  if (!activeVideoTraceId) return;
-  if (traceId && activeVideoTraceId !== traceId) return;
-  try {
-    await sendVideoRecorderMessage({
-      type: 'video-stop',
-      ...(traceId ? { traceId } : {}),
-    });
-    if (traceId) await appendVideoAnnotation(traceId, 'video_stopped');
   } catch {
-    // Video capture is best-effort; event capture must still stop cleanly.
-  } finally {
-    if (!traceId || activeVideoTraceId === traceId) activeVideoTraceId = null;
+    // Badge updates are best-effort and must never break recording.
   }
-}
-
-async function ensureFirefoxVideoRecorderTab(): Promise<void> {
-  if (firefoxVideoRecorderTabId !== null) {
-    try {
-      await browser.tabs.get(firefoxVideoRecorderTabId);
-      await waitForVideoRecorderReady();
-      return;
-    } catch {
-      firefoxVideoRecorderTabId = null;
-    }
-  }
-  const tab = await browser.tabs.create({
-    url: browser.runtime.getURL('/video-recorder.html'),
-    active: false,
-  });
-  firefoxVideoRecorderTabId = tab.id ?? null;
-  await waitForVideoRecorderReady();
-}
-
-function handleVideoRecorderConnect(port: chrome.runtime.Port): void {
-  if (port.name !== VIDEO_RECORDER_PORT_NAME) return;
-  firefoxVideoRecorderPort = port;
-  port.onDisconnect.addListener(() => {
-    if (firefoxVideoRecorderPort === port) firefoxVideoRecorderPort = null;
-    for (const [requestId, waiter] of firefoxVideoResponseWaiters) {
-      clearTimeout(waiter.timeout);
-      waiter.reject(new Error('Firefox video recorder disconnected'));
-      firefoxVideoResponseWaiters.delete(requestId);
-    }
-  });
-  port.onMessage.addListener((message) => {
-    handleFirefoxVideoPortMessage(message);
-  });
-  for (const resolve of firefoxVideoReadyWaiters) resolve();
-  firefoxVideoReadyWaiters.clear();
-}
-
-async function persistVideoChunk(
-  message: Extract<RuntimeMessage, { type: 'video-chunk' }>
-): Promise<{ ok: boolean }> {
-  const blob = new Blob([message.data], { type: message.mimeType });
-  const decision = await evaluateVideoChunkStorage(message, blob.size);
-  if (!decision.accept) {
-    await handleVideoStorageLimitReached(message, decision.detail);
-    return { ok: true };
-  }
-
-  const blobRow: BlobRow = {
-    blob_key: message.blobKey,
-    trace_id: message.traceId,
-    kind: 'video',
-    data: blob,
-    created_at: message.endTimestamp,
-  };
-  const event: VideoChunkEvent = {
-    event_id: createId('ev_'),
-    trace_id: message.traceId,
-    tab_id: message.tabId,
-    timestamp: message.endTimestamp,
-    url: message.url,
-    kind: 'video_chunk',
-    blob_key: message.blobKey,
-    start_timestamp: message.startTimestamp,
-    end_timestamp: message.endTimestamp,
-  };
-
-  await db.transaction('rw', db.recordings, db.events, db.blobs, async () => {
-    const row = await db.recordings.get(message.traceId);
-    if (!row || row.status !== 'draft' || row.capture_paused) return;
-    await db.blobs.put(blobRow);
-    await db.events.put(event);
-  });
-  return { ok: true };
-}
-
-async function evaluateVideoChunkStorage(
-  message: Extract<RuntimeMessage, { type: 'video-chunk' }>,
-  chunkBytes: number
-): Promise<ReturnType<typeof evaluateVideoStorageBudget>> {
-  const [row, traceBlobs, allVideoBlobs] = await Promise.all([
-    db.recordings.get(message.traceId),
-    db.blobs.where('trace_id').equals(message.traceId).toArray(),
-    db.blobs.where('kind').equals('video').toArray(),
-  ]);
-  return evaluateVideoStorageBudget({
-    chunkBytes,
-    chunkEndTimestamp: message.endTimestamp,
-    recordingStartedAt: row?.created_at ?? message.startTimestamp,
-    existingRecordingBytes: totalBlobBytes(traceBlobs.filter((blob) => blob.kind === 'video')),
-    existingLocalBytes: totalBlobBytes(allVideoBlobs),
-  });
-}
-
-async function handleVideoStorageLimitReached(
-  message: Extract<RuntimeMessage, { type: 'video-chunk' }>,
-  detail: string
-): Promise<void> {
-  if (!videoLimitReachedTraceIds.has(message.traceId)) {
-    videoLimitReachedTraceIds.add(message.traceId);
-    await appendVideoAnnotation(
-      message.traceId,
-      'video_degraded',
-      `${detail} Video capture was stopped; browser events continue recording.`,
-      message.tabId,
-      message.url
-    );
-  }
-  if (activeVideoTraceId === message.traceId) {
-    await stopVideoCapture(message.traceId);
-  }
-}
-
-function totalBlobBytes(blobs: BlobRow[]): number {
-  return blobs.reduce((total, blob) => total + safeBlobSize(blob.data), 0);
-}
-
-function safeBlobSize(blob: Blob): number {
-  return Number.isFinite(blob.size) ? blob.size : 0;
-}
-
-async function appendVideoAnnotation(
-  traceId: string,
-  annotationType: VideoAnnotationType,
-  text = '',
-  tabId = -1,
-  url = ''
-): Promise<void> {
-  await appendEvent({
-    event_id: createId('ev_'),
-    trace_id: traceId,
-    tab_id: tabId,
-    timestamp: Date.now(),
-    url,
-    kind: 'annotation',
-    annotation_type: annotationType,
-    ...(text ? { text } : {}),
-  });
-}
-
-async function ensureVideoOffscreenDocument(): Promise<void> {
-  const offscreen = chrome.offscreen;
-  const documentUrl = chrome.runtime.getURL(VIDEO_RECORDER_URL);
-  if (await offscreen.hasDocument()) {
-    await waitForVideoRecorderReady();
-    return;
-  }
-  await offscreen.createDocument({
-    url: documentUrl,
-    reasons: ['USER_MEDIA'] as chrome.offscreen.Reason[],
-    justification: 'Record browser task videos for journey review and upload.',
-  });
-  await waitForVideoRecorderReady();
-}
-
-async function waitForVideoRecorderReady(): Promise<void> {
-  if (getBrowserAdapter().capabilities.browser === 'firefox') {
-    await waitForFirefoxVideoRecorderPort();
-    return;
-  }
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await sendVideoRecorderMessage<{ ok?: boolean }>({
-        type: 'video-ping',
-      });
-      if (response?.ok) return;
-    } catch {
-      // The offscreen document may still be loading.
-    }
-    await delay(50);
-  }
-  throw new Error('video recorder did not become ready');
-}
-
-async function waitForFirefoxVideoRecorderPort(): Promise<void> {
-  if (firefoxVideoRecorderPort) return;
-  await new Promise<void>((resolve, reject) => {
-    const waiter = () => {
-      clearTimeout(timeout);
-      resolve();
-    };
-    const timeout = setTimeout(() => {
-      firefoxVideoReadyWaiters.delete(waiter);
-      reject(new Error('video recorder did not become ready'));
-    }, 5_000);
-    firefoxVideoReadyWaiters.add(waiter);
-  });
-}
-
-async function getTabCaptureStreamId(tabId: number): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (streamId) => {
-      const error = chrome.runtime.lastError;
-      if (error) {
-        reject(new Error(error.message));
-        return;
-      }
-      if (!streamId) {
-        reject(new Error('tab capture did not return a stream id'));
-        return;
-      }
-      resolve(streamId);
-    });
-  });
-}
-
-async function sendVideoRecorderMessage<T = unknown>(
-  message: Record<string, unknown>
-): Promise<T> {
-  if (getBrowserAdapter().capabilities.browser === 'firefox') {
-    return (await sendFirefoxVideoRecorderPortMessage(message)) as T;
-  }
-  return (await browser.runtime.sendMessage(message)) as T;
-}
-
-async function sendFirefoxVideoRecorderPortMessage(
-  message: Record<string, unknown>
-): Promise<unknown> {
-  await waitForFirefoxVideoRecorderPort();
-  const port = firefoxVideoRecorderPort;
-  if (!port) throw new Error('Firefox video recorder port is unavailable');
-  const requestId = `video_req_${++firefoxVideoRequestId}`;
-  return await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      firefoxVideoResponseWaiters.delete(requestId);
-      reject(new Error('Firefox video recorder response timed out'));
-    }, 10_000);
-    firefoxVideoResponseWaiters.set(requestId, { resolve, reject, timeout });
-    try {
-      port.postMessage({ requestId, message });
-    } catch (error) {
-      clearTimeout(timeout);
-      firefoxVideoResponseWaiters.delete(requestId);
-      reject(error instanceof Error ? error : new Error(String(error)));
-    }
-  });
-}
-
-function handleFirefoxVideoPortMessage(message: unknown): void {
-  if (!message || typeof message !== 'object') return;
-  const value = message as { requestId?: unknown; response?: unknown; error?: unknown };
-  if (typeof value.requestId !== 'string') return;
-  const waiter = firefoxVideoResponseWaiters.get(value.requestId);
-  if (!waiter) return;
-  clearTimeout(waiter.timeout);
-  firefoxVideoResponseWaiters.delete(value.requestId);
-  if (typeof value.error === 'string') {
-    waiter.reject(new Error(value.error));
-    return;
-  }
-  waiter.resolve(value.response);
-}
-
-async function videoCaptureTargetTab(): Promise<SenderLike['tab']> {
-  const activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
-  const activeRecordableTab = activeTabs.find((tab) =>
-    shouldRecordBrowserNavigationUrl(tab.url)
-  );
-  if (activeRecordableTab) return activeRecordableTab;
-
-  const currentWindowTabs = await browser.tabs.query({ currentWindow: true });
-  const currentWindowRecordableTab = [...currentWindowTabs]
-    .reverse()
-    .find((tab) => shouldRecordBrowserNavigationUrl(tab.url));
-  if (currentWindowRecordableTab) return currentWindowRecordableTab;
-
-  const allTabs = await browser.tabs.query({});
-  return [...allTabs]
-    .reverse()
-    .find((tab) => shouldRecordBrowserNavigationUrl(tab.url));
-}
-
-function supportsChromeVideoCapture(): boolean {
-  return Boolean(chrome.offscreen && chrome.tabCapture?.getMediaStreamId);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function handleTabCreated(tab: { id?: number; url?: string; pendingUrl?: string; openerTabId?: number }): Promise<void> {
@@ -891,50 +429,15 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
   return (
     type === 'get-active-recording' ||
     type === 'start-recording' ||
-    (type === 'start-task-recording' && typeof (message as { caseId?: unknown }).caseId === 'string') ||
     type === 'pause-capture' ||
     type === 'resume-capture' ||
     type === 'stop-recording' ||
     type === 'event' ||
     isCaptchaDetectedMessage(message) ||
     isAppendAnnotationMessage(message) ||
-    isVideoChunkMessage(message) ||
-    type === 'open-dashboard' ||
     (type === 'resume-upload' && typeof (message as { traceId?: unknown }).traceId === 'string') ||
     (type === 'poll-upload-status' && typeof (message as { traceId?: unknown }).traceId === 'string') ||
     (type === 'delete-recording' && typeof (message as { traceId?: unknown }).traceId === 'string')
-  );
-}
-
-function isVideoChunkMessage(message: object): boolean {
-  const value = message as {
-    type?: unknown;
-    traceId?: unknown;
-    tabId?: unknown;
-    url?: unknown;
-    blobKey?: unknown;
-    startTimestamp?: unknown;
-    endTimestamp?: unknown;
-    mimeType?: unknown;
-    data?: unknown;
-  };
-  return (
-    value.type === 'video-chunk' &&
-    typeof value.traceId === 'string' &&
-    typeof value.tabId === 'number' &&
-    typeof value.url === 'string' &&
-    typeof value.blobKey === 'string' &&
-    typeof value.startTimestamp === 'number' &&
-    typeof value.endTimestamp === 'number' &&
-    typeof value.mimeType === 'string' &&
-    isArrayBufferLike(value.data)
-  );
-}
-
-function isArrayBufferLike(value: unknown): value is ArrayBuffer {
-  return (
-    value instanceof ArrayBuffer ||
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]'
   );
 }
 

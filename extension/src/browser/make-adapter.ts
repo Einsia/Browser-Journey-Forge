@@ -8,7 +8,7 @@ import type { BrowserCapabilities } from '@/shared/types';
  */
 export const BASE_CAPABILITIES = {
   screenshots: false,
-  video: true,
+  video: false,
   webRequestBody: true,
   injectedResponseBody: true,
 } satisfies Omit<BrowserCapabilities, 'browser'>;
@@ -23,22 +23,6 @@ export function makeBrowserAdapter(capabilities: BrowserCapabilities): BrowserAd
     capabilities,
     createAlarm(name, periodInMinutes) {
       void browser.alarms.create(name, { periodInMinutes });
-    },
-    async openDashboard(hash = '') {
-      const dashboardUrl = browser.runtime.getURL(
-        'dashboard.html' as Parameters<typeof browser.runtime.getURL>[0]
-      );
-      const existing = (await browser.tabs.query({})).find((tab) =>
-        tab.url?.startsWith(dashboardUrl)
-      );
-      const fragment = hash.startsWith('#') ? hash : hash ? `#${hash}` : '';
-      const fullUrl = `${dashboardUrl}${fragment}`;
-      if (existing?.id) {
-        await browser.tabs.update(existing.id, { url: fullUrl, active: true });
-        if (existing.windowId) await browser.windows.update(existing.windowId, { focused: true });
-      } else {
-        await browser.tabs.create({ url: fullUrl });
-      }
     },
   };
 }

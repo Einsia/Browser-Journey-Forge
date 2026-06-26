@@ -741,11 +741,13 @@ def api_ext(authorization: str = Header(None)):
     return {
         "build_dir": str(EXT_BUILD),
         "built": EXT_BUILD.exists(),
+        # Ordered steps; the one with action "open" gets an inline button so the
+        # numbering and the button line up (no "click the button below/above").
         "steps": [
-            "Click ‘Open chrome://extensions’ below",
-            "Turn on Developer mode (top-right toggle)",
-            "Click ‘Load unpacked’ and pick the folder that just opened in Finder",
-            "It’s pre-configured to talk to this app — done",
+            {"text": "Open Chrome's extensions page and reveal the extension folder.", "action": "open"},
+            {"text": 'In Chrome, turn on "Developer mode" (toggle, top-right).', "action": None},
+            {"text": 'Click "Load unpacked" and choose the folder that was just revealed.', "action": None},
+            {"text": "Done — the extension auto-connects to this app.", "action": None},
         ],
     }
 
@@ -782,6 +784,25 @@ def api_ext_open_chrome(authorization: str = Header(None)):
     else:
         subprocess.run(["google-chrome", "chrome://extensions/"], check=False)
     return {"ok": True}
+
+
+@app.post("/api/ext/open")
+def api_ext_open(authorization: str = Header(None)):
+    """One click for step 1: reveal the extension folder AND open Chrome's
+    extensions page, so the user just toggles Developer mode + Load unpacked."""
+    _check_auth(authorization)
+    if not EXT_BUILD.exists():
+        raise HTTPException(404, "extension folder not found — rebuild/reinstall the app")
+    _os_open(str(EXT_BUILD))  # reveal folder
+    if sys.platform == "darwin":
+        r = subprocess.run(["open", "-a", "Google Chrome", "chrome://extensions/"], check=False)
+        if r.returncode != 0:
+            subprocess.run(["open", "chrome://extensions/"], check=False)
+    elif sys.platform.startswith("win"):
+        subprocess.run(["cmd", "/c", "start", "chrome", "chrome://extensions/"], check=False)
+    else:
+        subprocess.run(["google-chrome", "chrome://extensions/"], check=False)
+    return {"ok": True, "path": str(EXT_BUILD)}
 
 
 # ── Claude Desktop integration (browser execution via Playwright MCP) ─────────

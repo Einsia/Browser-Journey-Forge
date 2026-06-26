@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Dexie from 'dexie';
-import { requestIdentityBundle } from '@/identity/client';
 import {
   appendEvent,
   pauseCapture,
@@ -173,51 +172,6 @@ function stubChromeRuntime() {
   });
 }
 
-describe('identity client', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('posts identity bundle requests with bearer auth and normalized endpoint URL', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        identity_bundle_id: 'idb_test',
-        email: 'test@example.test',
-        email_password: 'secret',
-        webmail_url: 'https://mail.example.test',
-        persona: {},
-        payment: { enabled: false },
-        expires_at: '2026-06-04T00:00:00.000Z',
-      }),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(
-      requestIdentityBundle({
-        endpointUrl: 'https://api.example.test///',
-        apiKey: 'key_test',
-      })
-    ).resolves.toMatchObject({ identity_bundle_id: 'idb_test' });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.example.test/v1/identity-bundles',
-      {
-        method: 'POST',
-        headers: {
-          authorization: 'Bearer key_test',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ purpose: 'research_free_form' }),
-      }
-    );
-  });
-});
-
 describe('recorder lifecycle', () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
@@ -230,23 +184,8 @@ describe('recorder lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
-  it('starts a draft recording with an identity bundle and persisted lifecycle annotation', async () => {
+  it('starts a draft recording with a persisted lifecycle annotation and no identity', async () => {
     stubChromeRuntime();
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          identity_bundle_id: 'idb_start',
-          email: 'start@example.test',
-          email_password: 'secret',
-          webmail_url: 'https://mail.example.test',
-          persona: { name: 'Start User' },
-          payment: { enabled: false },
-          expires_at: '2026-06-04T00:00:00.000Z',
-        }),
-      })
-    );
     await setConfig({
       endpoint_url: 'https://api.example.test',
       api_key: 'key_start',
@@ -262,15 +201,15 @@ describe('recorder lifecycle', () => {
       .toArray();
 
     expect(row.status).toBe('draft');
-    expect(row.identity?.identity_bundle_id).toBe('idb_start');
+    expect(row.identity).toBeUndefined();
     expect(row.envelope).toMatchObject({
       trace_id: row.trace_id,
       recording_mode: 'research_free_form',
-      identity_bundle_id: 'idb_start',
       browser: {
         extension_version: '9.8.7',
       },
     });
+    expect(row.envelope).not.toHaveProperty('identity_bundle_id');
     expect(persisted?.status).toBe('draft');
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -281,26 +220,19 @@ describe('recorder lifecycle', () => {
     });
   });
 
-  it('starts real-user recordings without requesting generated identity', async () => {
+  it('starts recordings with a label stored in the envelope', async () => {
     stubChromeRuntime();
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
     await setConfig({
       endpoint_url: 'https://api.example.test',
-      api_key: 'key_real',
-      recording_mode: 'real_user_free_form',
+      api_key: 'key_label',
     });
 
     const row = await startRecording(
-      fixedClock(100, '2026-06-03T00:00:00.100Z')
+      fixedClock(100, '2026-06-03T00:00:00.100Z'),
+      { label: '  book a flight  ' }
     );
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(row.identity).toBeUndefined();
-    expect(row.envelope).toMatchObject({
-      recording_mode: 'real_user_free_form',
-    });
-    expect(row.envelope).not.toHaveProperty('identity_bundle_id');
+    expect(row.envelope.label).toBe('book a flight');
   });
 
   it('requires endpoint config before starting a recording', async () => {

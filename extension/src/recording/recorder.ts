@@ -1,15 +1,13 @@
 import { getBrowserAdapter } from '@/browser';
-import { requestIdentityBundle } from '@/identity/client';
-import { IDENTITY_BEST_EFFORT } from '@/shared/product';
 import { collectEventDomains } from '@/shared/events';
 import { createId } from '@/shared/id';
 import { systemClock, type Clock } from '@/shared/time';
-import type { CapturedEvent, IdentityBundle, RecordingRow, TraceSummary } from '@/shared/types';
+import type { CapturedEvent, RecordingRow, TraceSummary } from '@/shared/types';
 import { db, getConfig } from '@/storage/db';
 
 export async function startRecording(
   clock: Clock = systemClock,
-  opts?: { taskCaseId?: string }
+  opts?: { taskCaseId?: string; label?: string }
 ): Promise<RecordingRow> {
   const config = await getConfig();
   if (!config.endpoint_url || !config.api_key) {
@@ -18,21 +16,6 @@ export async function startRecording(
     );
   }
 
-  // Identity bundles are a research concept. In the product build the local
-  // server has no identity endpoint, so this is best-effort: a failure (or a
-  // server that doesn't support it) must never block recording.
-  let identity: IdentityBundle | undefined;
-  if (config.recording_mode === 'research_free_form') {
-    try {
-      identity = await requestIdentityBundle({
-        endpointUrl: config.endpoint_url,
-        apiKey: config.api_key,
-      });
-    } catch (err) {
-      if (!IDENTITY_BEST_EFFORT) throw err;
-      console.warn('[journey-forge] identity bundle unavailable; continuing without it', err);
-    }
-  }
   const adapter = getBrowserAdapter();
   const captureSettings = {
     ...config.capture,
@@ -50,8 +33,8 @@ export async function startRecording(
       recording_mode: config.recording_mode,
       started_at: clock.isoNow(),
       tags: [],
-      ...(opts?.taskCaseId ? { task_case_id: opts.taskCaseId, label: opts.taskCaseId } : {}),
-      ...(identity ? { identity_bundle_id: identity.identity_bundle_id } : {}),
+      ...(opts?.taskCaseId ? { task_case_id: opts.taskCaseId } : {}),
+      ...(resolveLabel(opts) ? { label: resolveLabel(opts) } : {}),
       capture_settings: captureSettings,
       browser: {
         extension_version: chrome.runtime.getManifest().version ?? '0.0.0',
@@ -66,7 +49,6 @@ export async function startRecording(
         video_chunk_count: 0,
       },
     },
-    ...(identity ? { identity } : {}),
     created_at: now,
     updated_at: now,
   };
@@ -86,6 +68,10 @@ export async function startRecording(
   });
 
   return row;
+}
+
+function resolveLabel(opts?: { taskCaseId?: string; label?: string }): string {
+  return opts?.label?.trim() || opts?.taskCaseId?.trim() || '';
 }
 
 export async function stopRecording(

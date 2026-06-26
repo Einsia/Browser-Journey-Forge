@@ -283,18 +283,17 @@ window.setCodexMcp = async (playwright, skills)=>{
 async function renderExtension(){
   let d; try{ d = await api('/api/ext'); }
   catch(e){ $('#cfg_ext').innerHTML=`<h2>Extension</h2><span class="err">${esc(e.message)}</span>`; return; }
+  const steps = (d.steps||[]).map(s=>{
+    const btn = s.action==='open'
+      ? ` <button class="act" onclick="extOpen()">Open Chrome + reveal folder</button>` : '';
+    return `<li style="margin:7px 0">${esc(s.text)}${btn}</li>`;
+  }).join('');
   $('#cfg_ext').innerHTML = `<h2>Browser extension (the recorder)</h2>
-    <p class="mut">Chrome only allows true one-click installs from its Web Store. Until we publish there it's a 3-click "Load unpacked" — these buttons do the fiddly parts.</p>
-    <div class="row" style="margin:10px 0">
-      <button class="act" onclick="extOpenChrome()">1 · Open chrome://extensions</button>
-      <button class="ghost" onclick="extReveal()">2 · Reveal the extension folder</button>
-    </div>
-    <ol>${(d.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
-    <p class="meta">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>
-    <p class="meta">It auto-connects to this app once loaded. Redo only after updating the app.</p>`;
+    <p class="mut">Until it's on the Chrome Web Store, loading is a one-time "Load unpacked". Follow these in order — each step's button is right next to it.</p>
+    <ol style="padding-left:20px;margin:8px 0">${steps}</ol>
+    <p class="meta">Folder: <code>${esc(d.build_dir)}</code> · ${d.built?'<span class="ok">ready</span>':'<span class="err">missing</span>'}</p>`;
 }
-window.extOpenChrome = async ()=>{ try{ await api('/api/ext/open-chrome',{method:'POST'}); toast('Opened chrome://extensions — turn on Developer mode (top-right)'); }catch(e){ toast(e.message,true);} };
-window.extReveal = async ()=>{ try{ await api('/api/ext/reveal',{method:'POST'}); toast('Folder opened in Finder — pick it in "Load unpacked"'); }catch(e){ toast(e.message,true);} };
+window.extOpen = async ()=>{ try{ await api('/api/ext/open',{method:'POST'}); toast('Opened chrome://extensions and revealed the folder — turn on Developer mode, then Load unpacked.'); }catch(e){ toast(e.message,true);} };
 
 refresh();
 showVersion();

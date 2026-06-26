@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { firefoxAdapter } from '@/browser/firefox-adapter';
 import { getBrowserAdapter } from '@/browser';
 
 const browserApi = vi.hoisted(() => ({
@@ -47,7 +46,7 @@ describe('browser adapter selection', () => {
     expect(getBrowserAdapter().capabilities).toMatchObject({
       browser: 'firefox',
       screenshots: false,
-      video: true
+      video: false
     });
   });
 
@@ -57,7 +56,7 @@ describe('browser adapter selection', () => {
     expect(getBrowserAdapter().capabilities).toMatchObject({
       browser: 'chrome',
       screenshots: false,
-      video: true
+      video: false
     });
   });
 
@@ -69,30 +68,5 @@ describe('browser adapter selection', () => {
       screenshots: false,
       video: false
     });
-  });
-
-  it('uses WXT browser namespace for Firefox dashboard opening', async () => {
-    const chromeTabsCreate = vi.fn();
-    vi.stubGlobal('chrome', {
-      alarms: {
-        create: vi.fn()
-      },
-      runtime: {
-        getURL: vi.fn()
-      },
-      tabs: {
-        create: chromeTabsCreate
-      }
-    });
-    browserApi.runtime.getURL.mockReturnValue('moz-extension://extension-id/dashboard.html#review');
-    browserApi.tabs.create.mockResolvedValue({ id: 1 });
-
-    await firefoxAdapter.openDashboard('#review');
-
-    expect(browserApi.runtime.getURL).toHaveBeenCalledWith('dashboard.html#review');
-    expect(browserApi.tabs.create).toHaveBeenCalledWith({
-      url: 'moz-extension://extension-id/dashboard.html#review'
-    });
-    expect(chromeTabsCreate).not.toHaveBeenCalled();
   });
 });

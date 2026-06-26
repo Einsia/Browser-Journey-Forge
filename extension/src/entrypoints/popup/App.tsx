@@ -1,253 +1,96 @@
-import { useEffect, useMemo, useState } from 'react';
-import { browser } from 'wxt/browser';
-import { getBrowserAdapter } from '@/browser';
-import { createTranslator, effectiveLocale, type Translator } from '@/i18n';
-import {
-  captureModeNotice,
-  captureStateLabel,
-  recordingActivityNotice,
-} from '@/reliability/status';
-import { alertTone } from '@/shared/alert-tone';
+import { useEffect, useRef, useState } from 'react';
 import { errorMessage } from '@/shared/errors';
-import { TUNNEL_BYPASS_HEADERS } from '@/shared/http';
 import { sendRuntimeMessage } from '@/shared/runtime';
-import { IdentityPanel } from '@/ui/identity-panel';
-import { canStartRecording, sidePanelAvailability } from '@/ui/state';
-import { getConfig, type ConfigRow } from '@/storage/db';
-import { subscribeLocalStoreChanges } from '@/storage/live-refresh';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  StatusDetail,
-} from '@/ui/primitives';
-import type {
-  BrowserCapabilities,
-  RecordingRow,
-} from '@/shared/types';
+import { buildLiveTraceSummary } from '@/recording/trace-summary';
+import { getConfig } from '@/storage/db';
+import { Alert, Badge, Button, Card, CardContent, Input } from '@/ui/primitives';
+import type { RecordingRow, TraceSummary } from '@/shared/types';
 
 type ActiveRecordingResponse = {
   active: boolean;
   traceId: string | null;
   recovered?: boolean;
-  capturePaused?: boolean;
   row?: RecordingRow | null;
 };
 
 type RecordingActionResponse = {
   active: boolean;
   traceId: string | null;
-  recovered?: boolean;
-  capturePaused?: boolean;
   row?: RecordingRow;
 };
 
-type RuntimeMessage =
-  | { type: 'get-active-recording' }
-  | { type: 'start-recording' }
-  | { type: 'pause-capture'; traceId?: string }
-  | { type: 'resume-capture'; traceId?: string }
-  | { type: 'stop-recording'; traceId?: string }
-  | {
-      type: 'append-annotation';
-      traceId?: string;
-      annotationType: 'captcha_solved' | 'captcha_blocked';
-      text?: string;
-    }
-  | { type: 'open-dashboard'; hash?: string }
-  | { type: 'delete-recording'; traceId: string };
+type Stopped = {
+  row: RecordingRow;
+  summary: TraceSummary;
+};
 
-type RecorderPanelSurface = 'popup' | 'sidepanel';
-
-const DEFAULT_CAPABILITIES = getBrowserAdapter().capabilities;
+type View = 'idle' | 'recording' | 'stopped';
 
 export function PopupApp() {
-  return <RecorderPanel surface="popup" />;
-}
-
-export function RecorderPanel(props: { surface: RecorderPanelSurface }) {
-  const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
-  const [activeRecovered, setActiveRecovered] = useState(false);
-  const [activeCapturePaused, setActiveCapturePaused] = useState(false);
-  const [activeRecording, setActiveRecording] = useState<RecordingRow | null>(
-    null
-  );
-  const [config, setConfigState] = useState<ConfigRow | null>(null);
-  const [capabilities] = useState<BrowserCapabilities>(DEFAULT_CAPABILITIES);
-  const [taskBrief, setTaskBrief] = useState<string | null>(null);
-  const [taskBriefLoading, setTaskBriefLoading] = useState(false);
+  const [view, setView] = useState<View>('idle');
+  const [endpointReady, setEndpointReady] = useState(true);
+  const [taskName, setTaskName] = useState('');
+  const [activeRow, setActiveRow] = useState<RecordingRow | null>(null);
+  const [liveSummary, setLiveSummary] = useState<TraceSummary | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const [stopped, setStopped] = useState<Stopped | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [captchaFlash, setCaptchaFlash] = useState<string | null>(null);
-  const sidePanel = sidePanelAvailability(capabilities);
-  const isSidePanel = props.surface === 'sidepanel';
-  const locale = effectiveLocale(config?.locale);
-  const tr = useMemo(() => createTranslator(locale), [locale]);
-
-  const endpointReady = useMemo(
-    () => Boolean(config?.endpoint_url.trim() && config.api_key.trim()),
-    [config]
-  );
+  const [notice, setNotice] = useState<string | null>(null);
+  const stoppedRef = useRef(false);
 
   useEffect(() => {
-    void refreshPopup();
-    if (!isSidePanel) return undefined;
-    const subscription = subscribeLocalStoreChanges(() => {
-      void refreshPopup();
-    });
-    return () => subscription.unsubscribe();
-  }, [isSidePanel]);
-
-  useEffect(() => {
-    if (!isSidePanel) return;
-    const caseId = activeRecording?.envelope.task_case_id;
-    if (!caseId || !config?.endpoint_url) {
-      setTaskBrief(null);
-      return;
-    }
     let cancelled = false;
-    setTaskBriefLoading(true);
-    fetch(`${config.endpoint_url.replace(/\/$/, '')}/v1/tasks/${encodeURIComponent(caseId)}`, {
-      headers: { ...TUNNEL_BYPASS_HEADERS, ...(config.api_key ? { 'Authorization': `Bearer ${config.api_key}` } : {}) },
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!cancelled) setTaskBrief(data?.brief ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setTaskBrief(null);
-      })
-      .finally(() => {
-        if (!cancelled) setTaskBriefLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [isSidePanel, activeRecording?.envelope.task_case_id, config?.endpoint_url]);
-
-  async function refreshPopup(): Promise<void> {
-    const [nextConfig, active] = await Promise.all([
-      getConfig(),
-      sendRuntimeMessage<ActiveRecordingResponse>({
-        type: 'get-active-recording',
-      }),
-    ]);
-    setConfigState(nextConfig);
-    setActiveTraceId(active.traceId);
-    setActiveRecovered(Boolean(active.recovered));
-    setActiveCapturePaused(Boolean(active.capturePaused));
-    setActiveRecording(active.row ?? null);
-  }
-
-  async function startRecording(): Promise<void> {
-    await runAction(async () => {
-      const response = await sendRuntimeMessage<RecordingActionResponse>({
-        type: 'start-recording',
-      });
-      setActiveTraceId(response.traceId);
-      setActiveRecovered(Boolean(response.recovered));
-      setActiveCapturePaused(Boolean(response.capturePaused));
-      setActiveRecording(response.row ?? null);
-    });
-  }
-
-  async function pauseOrResumeCapture(): Promise<void> {
-    await runAction(async () => {
-      const message: RuntimeMessage = activeCapturePaused
-        ? activeTraceId
-          ? { type: 'resume-capture', traceId: activeTraceId }
-          : { type: 'resume-capture' }
-        : activeTraceId
-        ? { type: 'pause-capture', traceId: activeTraceId }
-        : { type: 'pause-capture' };
-      const response = await sendRuntimeMessage<RecordingActionResponse>(
-        message
-      );
-      setActiveTraceId(response.traceId);
-      setActiveRecovered(Boolean(response.recovered));
-      setActiveCapturePaused(Boolean(response.capturePaused));
-      setActiveRecording(response.row ?? null);
-    });
-  }
-
-  async function stopRecording(): Promise<void> {
-    const stoppedTraceId = activeTraceId;
-    await runAction(async () => {
-      const message: RuntimeMessage = stoppedTraceId
-        ? { type: 'stop-recording', traceId: stoppedTraceId }
-        : { type: 'stop-recording' };
-      const response = await sendRuntimeMessage<RecordingActionResponse>(message);
-      setActiveTraceId(null);
-      setActiveRecovered(false);
-      setActiveCapturePaused(false);
-      setActiveRecording(null);
-      const reviewTraceId = stoppedTraceId ?? response.row?.trace_id;
-      if (reviewTraceId) {
-        await sendRuntimeMessage<{ ok: boolean }>({
-          type: 'open-dashboard',
-          hash: `review=${encodeURIComponent(reviewTraceId)}`,
-        });
+    void (async () => {
+      const [config, active] = await Promise.all([
+        getConfig(),
+        sendRuntimeMessage<ActiveRecordingResponse>({ type: 'get-active-recording' }),
+      ]);
+      if (cancelled) return;
+      setEndpointReady(Boolean(config.endpoint_url.trim() && config.api_key.trim()));
+      if (active.active && active.row && !stoppedRef.current) {
+        setActiveRow(active.row);
+        setView('recording');
       }
-    });
-  }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const activityNotice = recordingActivityNotice({
-    active: activeTraceId !== null,
-    traceId: activeTraceId,
-    recovered: activeRecovered,
-  }, tr);
-  const captureState = activeRecording
-    ? captureStateLabel(
-        {
-          ...activeRecording,
-          capture_paused: activeCapturePaused,
-        },
-        tr
-      )
-    : null;
-  const mediaNotice = config ? captureModeNotice(config.capture, tr) : null;
-  const startGate = config
-    ? canStartRecording({
-        recordingMode: config.recording_mode,
-        realUserConsentAccepted: config.realUserConsentAccepted,
-      })
-    : { allowed: true as const };
-  async function openDashboard(hash = ''): Promise<void> {
-    await runAction(async () => {
-      await sendRuntimeMessage<{ ok: boolean }>({
-        type: 'open-dashboard',
-        ...(hash ? { hash } : {}),
-      });
-    });
-  }
+  // Poll live trace stats + elapsed timer while recording.
+  useEffect(() => {
+    if (view !== 'recording') return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      setNow(Date.now());
+      const active = await sendRuntimeMessage<ActiveRecordingResponse>({ type: 'get-active-recording' });
+      if (cancelled) return;
+      if (!active.active || !active.row) {
+        setView('idle');
+        setActiveRow(null);
+        return;
+      }
+      setActiveRow(active.row);
+      try {
+        setLiveSummary(await buildLiveTraceSummary(active.row));
+      } catch {
+        // Live stats are best-effort.
+      }
+    };
+    void tick();
+    const handle = setInterval(() => void tick(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [view]);
 
-  async function openSidePanel(): Promise<void> {
-    await runAction(async () => {
-      await openChromeSidePanel(tr);
-    });
-  }
-
-  async function markCaptcha(
-    annotationType: 'captcha_solved' | 'captcha_blocked'
-  ): Promise<void> {
-    await runAction(async () => {
-      await sendRuntimeMessage<{ ok: boolean }>({
-        type: 'append-annotation',
-        ...(activeTraceId ? { traceId: activeTraceId } : {}),
-        annotationType,
-      });
-      setCaptchaFlash(tr('popup.captchaMarked'));
-      setTimeout(() => setCaptchaFlash(null), 2000);
-    });
-  }
-
-  async function runAction(action: () => Promise<void>): Promise<void> {
+  async function run(action: () => Promise<void>): Promise<void> {
     setBusy(true);
     setError(null);
     try {
       await action();
-      await refreshPopup();
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -255,182 +98,178 @@ export function RecorderPanel(props: { surface: RecorderPanelSurface }) {
     }
   }
 
+  function start(): void {
+    void run(async () => {
+      const response = await sendRuntimeMessage<RecordingActionResponse>(
+        taskName.trim() ? { type: 'start-recording', label: taskName.trim() } : { type: 'start-recording' }
+      );
+      setNotice(null);
+      setActiveRow(response.row ?? null);
+      setLiveSummary(null);
+      setNow(Date.now());
+      setView('recording');
+    });
+  }
+
+  function stop(): void {
+    void run(async () => {
+      const traceId = activeRow?.trace_id;
+      const response = await sendRuntimeMessage<RecordingActionResponse>(
+        traceId ? { type: 'stop-recording', traceId } : { type: 'stop-recording' }
+      );
+      const row = response.row;
+      if (!row) {
+        setView('idle');
+        return;
+      }
+      stoppedRef.current = true;
+      const summary = await buildLiveTraceSummary(row);
+      setStopped({ row, summary });
+      setActiveRow(null);
+      setView('stopped');
+    });
+  }
+
+  function upload(): void {
+    if (!stopped) return;
+    void run(async () => {
+      const traceId = stopped.row.trace_id;
+      await sendRuntimeMessage<{ ok: boolean }>(
+        taskName.trim()
+          ? { type: 'resume-upload', traceId, label: taskName.trim() }
+          : { type: 'resume-upload', traceId }
+      );
+      stoppedRef.current = false;
+      setStopped(null);
+      setTaskName('');
+      setNotice('Recording uploaded.');
+      setView('idle');
+    });
+  }
+
+  function discard(): void {
+    if (!stopped) return;
+    void run(async () => {
+      await sendRuntimeMessage<{ ok: boolean }>({ type: 'delete-recording', traceId: stopped.row.trace_id });
+      stoppedRef.current = false;
+      setStopped(null);
+      setTaskName('');
+      setNotice('Recording discarded.');
+      setView('idle');
+    });
+  }
+
   return (
-    <main className={isSidePanel ? 'sidepanel-shell' : 'popup-shell'}>
-      <header className="popup-header">
-        <div>
-          <h1>{tr('app.popupTitle')}</h1>
-        </div>
-        <span
-          className={activeTraceId ? 'status-dot active' : 'status-dot'}
-          aria-label={tr('popup.recordingStatusAria')}
-        />
+    <main className="jf-popup">
+      <header className="jf-header">
+        <h1 className="jf-title">Journey Forge</h1>
+        <span className={view === 'recording' ? 'jf-dot recording' : 'jf-dot'} aria-hidden />
       </header>
-
-      {!isSidePanel && activeTraceId ? (
-        <Card className="recorder-state-card" aria-live="polite">
-          <CardContent>
-            <div className="recorder-state-top">
-              <span>{tr('popup.recording')}</span>
-              <Badge tone={activeCapturePaused ? 'warning' : 'success'}>
-                {activeCapturePaused ? tr('popup.paused') : tr('popup.active')}
-              </Badge>
-            </div>
-            {activeCapturePaused ? (
-              <p>{tr('popup.pausedDraftSaved')}</p>
-            ) : null}
-            <code>{activeTraceId}</code>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {!activeTraceId && config ? (
-        <Alert tone={config.recording_mode === 'real_user_free_form' ? 'info' : 'warning'}>
-          <span>{tr(config.recording_mode === 'real_user_free_form' ? 'popup.identityWarningRealUser' : 'popup.identityWarningResearch')}</span>
-        </Alert>
-      ) : null}
-
-      {!isSidePanel && activityNotice ? (
-        <Alert tone={alertTone(activityNotice.tone)}>
-          <strong>{activityNotice.title}</strong>
-          <span>{activityNotice.detail}</span>
-        </Alert>
-      ) : null}
-
-      {!isSidePanel && mediaNotice ? (
-        <Alert tone={alertTone(mediaNotice.tone)}>
-          <strong>{mediaNotice.title}</strong>
-          <span>{mediaNotice.detail}</span>
-        </Alert>
-      ) : null}
-
-      {!isSidePanel && captureState && captureState.tone === 'warning' ? (
-        <Alert tone="warning">
-          <StatusDetail
-            tone={captureState.tone}
-            label={captureState.label}
-            detail={captureState.detail}
-          />
-        </Alert>
-      ) : null}
-
-      {!endpointReady ? (
-        <Alert tone="warning">
-          {tr('popup.endpointRequired')}
-        </Alert>
-      ) : null}
-
-      {!isSidePanel && !capabilities.video ? (
-        <Alert>
-          {tr('popup.videoUnavailable')}
-        </Alert>
-      ) : null}
 
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
-      <div className="recorder-actions">
-        <Button
-          variant="primary"
-          onClick={startRecording}
-          disabled={
-            busy ||
-            activeTraceId !== null ||
-            !endpointReady ||
-            !startGate.allowed
-          }
-        >
-          {tr('popup.start')}
-        </Button>
-        <Button
-          onClick={stopRecording}
-          disabled={busy || activeTraceId === null}
-        >
-          {tr('popup.stop')}
-        </Button>
-        <Button
-          onClick={pauseOrResumeCapture}
-          disabled={busy || activeTraceId === null}
-        >
-          {activeCapturePaused ? tr('popup.resumeRecording') : tr('popup.pauseRecording')}
-        </Button>
-      </div>
+      {view === 'idle' ? (
+        <>
+          {notice ? <Alert tone="success">{notice}</Alert> : null}
+          {!endpointReady ? (
+            <Alert tone="warning">Set the local server endpoint and API key before recording.</Alert>
+          ) : null}
+          <label className="jf-field">
+            <span>Task name (optional)</span>
+            <Input
+              value={taskName}
+              placeholder="e.g. Book a flight to Tokyo"
+              onChange={(event) => setTaskName(event.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <Button variant="primary" className="jf-wide" onClick={start} disabled={busy || !endpointReady}>
+            Start recording
+          </Button>
+        </>
+      ) : null}
 
-      {activeTraceId && !activeCapturePaused ? (
-        <div className="captcha-section">
-          <p className="captcha-hint">{tr('popup.captchaHint')}</p>
-          <div className="recorder-actions compact">
-            <Button onClick={() => markCaptcha('captcha_solved')} disabled={busy} title={tr('popup.captchaSolvedTip')}>
-              {tr('popup.captchaSolved')}
+      {view === 'recording' ? (
+        <>
+          <Card>
+            <CardContent>
+              <div className="jf-rec-top">
+                <span className="jf-muted">Recording</span>
+                <Badge tone="danger">LIVE</Badge>
+              </div>
+              <div className="jf-stat-row">
+                <div className="jf-stat">
+                  <strong>{formatDuration(elapsedMs(activeRow, now))}</strong>
+                  <span>elapsed</span>
+                </div>
+                <div className="jf-stat">
+                  <strong>{liveSummary ? totalEvents(liveSummary) : 0}</strong>
+                  <span>events</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Button variant="danger" className="jf-wide" onClick={stop} disabled={busy}>
+            Stop
+          </Button>
+        </>
+      ) : null}
+
+      {view === 'stopped' && stopped ? (
+        <>
+          <Card>
+            <CardContent>
+              <div className="jf-rec-top">
+                <span className="jf-muted">Recording saved</span>
+                <Badge tone="success">READY</Badge>
+              </div>
+              <div className="jf-summary-grid">
+                <div className="jf-stat">
+                  <strong>{totalEvents(stopped.summary)}</strong>
+                  <span>events</span>
+                </div>
+                <div className="jf-stat">
+                  <strong>{stopped.summary.domains.length}</strong>
+                  <span>domains</span>
+                </div>
+                <div className="jf-stat">
+                  <strong>{formatDuration(stopped.summary.duration_ms)}</strong>
+                  <span>duration</span>
+                </div>
+              </div>
+              {stopped.summary.domains.length ? (
+                <p className="jf-domains">{stopped.summary.domains.slice(0, 6).join(', ')}</p>
+              ) : null}
+            </CardContent>
+          </Card>
+          <div className="jf-actions">
+            <Button variant="primary" onClick={upload} disabled={busy}>
+              Upload
             </Button>
-            <Button onClick={() => markCaptcha('captcha_blocked')} disabled={busy} title={tr('popup.captchaBlockedTip')}>
-              {tr('popup.captchaBlocked')}
+            <Button onClick={discard} disabled={busy}>
+              Discard
             </Button>
           </div>
-          {captchaFlash ? <p className="captcha-flash">{captchaFlash}</p> : null}
-        </div>
-      ) : null}
-
-      {isSidePanel && activeTraceId && (taskBrief || taskBriefLoading) ? (
-        <Card className="sidepanel-brief-card">
-          <CardHeader>
-            <strong>{tr('tasks.briefTitle')}</strong>
-          </CardHeader>
-          <CardContent>
-            {taskBriefLoading ? (
-              <p className="brief-loading">{tr('tasks.briefLoading')}</p>
-            ) : (
-              <div className="sidepanel-brief-content">{taskBrief}</div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {activeTraceId ? (
-        <IdentityPanel
-          identity={activeRecording?.identity}
-          mode={
-            activeRecording?.envelope.recording_mode ?? config?.recording_mode
-          }
-          tr={tr}
-          compact
-        />
-      ) : null}
-
-      {!(isSidePanel && activeTraceId) ? (
-        <Button
-          className="recorder-wide-action"
-          onClick={() => void openDashboard()}
-          disabled={busy}
-        >
-          {tr('popup.openDashboard')}
-        </Button>
-      ) : null}
-
-      {!isSidePanel && sidePanel.available ? (
-        <Button
-          className="recorder-wide-action"
-          onClick={openSidePanel}
-          disabled={busy}
-        >
-          {tr('popup.openSidePanel')}
-        </Button>
+        </>
       ) : null}
     </main>
   );
 }
 
-type ChromeSidePanelRuntime = {
-  sidePanel?: {
-    open(options: { windowId?: number }): Promise<void> | void;
-  };
-};
-
-async function openChromeSidePanel(tr: Translator): Promise<void> {
-  const sidePanel = (globalThis.chrome as ChromeSidePanelRuntime | undefined)
-    ?.sidePanel;
-  if (!sidePanel?.open)
-    throw new Error(tr('popup.sidePanelUnavailable'));
-  const currentWindow = await browser.windows.getCurrent();
-  await sidePanel.open(currentWindow.id ? { windowId: currentWindow.id } : {});
+function elapsedMs(row: RecordingRow | null, now: number): number {
+  if (!row) return 0;
+  const started = Date.parse(row.envelope.started_at);
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, now - started);
 }
 
+function totalEvents(summary: TraceSummary): number {
+  return Object.values(summary.event_counts).reduce((sum, count) => sum + count, 0);
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}

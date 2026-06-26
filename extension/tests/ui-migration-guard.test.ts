@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 const entrypointFiles = [
   'src/entrypoints/popup/App.tsx',
-  'src/entrypoints/dashboard/App.tsx',
 ];
 
 const removedPatterns = [
