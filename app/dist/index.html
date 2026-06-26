@@ -140,14 +140,19 @@ function progCell(t){
   return `${pillHtml}<div class="mut" style="font-size:11px;margin-top:3px" title="${esc(full)}">${running?'<span class="spin-s"></span> ':''}${esc(label)}${p.detail?` · <span class="mut">${esc(p.detail.slice(0,28))}</span>`:''}</div>`;
 }
 function trajSection({trajectories}){
-  const rows = trajectories.map(t=>`<tr>
+  const rows = trajectories.map(t=>{
+    const note = t.note ? `<div class="mut" style="font-size:11px;margin-top:3px;color:var(--warn)">${esc(t.note)}</div>` : '';
+    return `<tr>
       <td><strong>${esc(t.label||'(untitled)')}</strong><div class="desc">${esc(t.description||'')}</div>
-          <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div></td>
-      <td>${pill(t.status)}</td><td>${progCell(t)}</td></tr>`).join('');
+          <div class="mut" style="font-size:11px">${esc(t.upload_id)} · ${esc((t.created_at||'').slice(0,19).replace('T',' '))} · ${t.n_chunks} chunk(s)</div>${note}</td>
+      <td>${pill(t.status)}</td><td>${progCell(t)}</td>
+      <td><button class="ghost" onclick="reprocess('${t.upload_id}')" ${t.distill_status==='running'?'disabled':''}>↻ Reprocess</button></td></tr>`;
+  }).join('');
   return `<div class="card"><h2>Recorded trajectories</h2>
-    <p class="mut">Every recording is processed automatically on finalize — atomized into segments, classified, and distilled. Hover the Pipeline cell for live detail.</p>
-    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
+    <p class="mut">Every recording is processed automatically on finalize — atomized into segments, classified, and distilled. Hover the Pipeline cell for live detail. Use Reprocess to re-run if a recording was interrupted or the LLM gateway was down.</p>
+    ${trajectories.length?`<table><thead><tr><th>Task</th><th>Upload</th><th>Pipeline</th><th></th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="mut">No trajectories yet — record one with the extension.</p>'}</div>`;
 }
+window.reprocess = async (id)=>{ try{ await api('/api/distill/'+id,{method:'POST'}); toast('Reprocessing…'); setTimeout(()=>{ if(TAB==='skills') tabSkills(); },800); }catch(e){ toast(e.message,true);} };
 
 // ── Settings (server key + LLM + Claude Desktop toggle + extension) ──────────
 async function tabSettings(){

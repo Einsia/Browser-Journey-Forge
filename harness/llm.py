@@ -32,6 +32,10 @@ def _ssl_context():
 
 def _http_post(url: str, headers: dict, body: dict, timeout: float) -> dict:
     data = json.dumps(body).encode("utf-8")
+    # Cloudflare-fronted gateways 403 the default Python-urllib UA (error 1010).
+    # Send a normal browser UA unless the caller already set one.
+    headers = {**headers}
+    headers.setdefault("User-Agent", config.LLM_USER_AGENT)
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:  # noqa: S310
         return json.loads(resp.read().decode("utf-8"))

@@ -31,6 +31,10 @@ from .classifier import ClassifiedSegment, classify_segments
 from .distiller import distill_bucket_sync
 from .registry import query_top_k, update_registry_entry
 
+import logging  # noqa: E402
+
+logger = logging.getLogger("journey_forge_local.ingest")
+
 
 def _segments_path() -> Path:
     return config.STATE_DIR / "segments.jsonl"
@@ -123,7 +127,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         all_segments.extend(segs)
         mark_track_ingested(cp, track.track_id)
         cp["pipeline"]["atomize"]["completed"] += 1
-        print(f"  {track.track_id}: {len(segs)} segments")
+        logger.info("ingest %s: %d segment(s)", track.track_id, len(segs))
 
     # Group segments by domain, classify each group with its domain's existing buckets
     by_domain: dict[str, list[Segment]] = defaultdict(list)
@@ -144,7 +148,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
     mark_segment_classified(cp, len(all_classified))
     _save_segments(all_classified)
-    print(f"[ingest] classified {len(all_classified)}/{len(all_segments)} segments")
+    logger.info("ingest classified %d/%d segment(s)", len(all_classified), len(all_segments))
 
     buckets = bucket_segments(all_classified, existing_buckets)
     save_buckets(buckets)

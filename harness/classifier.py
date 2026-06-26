@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from .atomizer import Segment
 from .event_utils import host_path
 from .llm import call_llm_fast, parse_json_from_model
 from . import config
+
+logger = logging.getLogger("journey_forge_local.classifier")
 
 
 @dataclass
@@ -159,7 +162,12 @@ async def classify_segments(
                 seen_caps.add(cs.label.capacity)
                 caps.append((cs.label.capacity, cs.label.description))
         except Exception as e:
-            print(f"[classifier] failed {seg.segment_id}: {e}")
+            # Visible via the app's logger (print() is block-buffered in the
+            # frozen sidecar and easily lost). This is the line that tells you
+            # WHY a recording produced no skills (e.g. HTTP 403 from the gateway).
+            logger.warning("classify failed for %s: %s", seg.segment_id, e)
 
     progress.report("classify", total, total, "")
+    if total and not results:
+        logger.warning("classify produced 0/%d labels — all calls failed (check LLM gateway)", total)
     return results

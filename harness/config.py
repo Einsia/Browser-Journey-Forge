@@ -38,3 +38,11 @@ PARALLEL: int = int(os.environ.get("SF_PARALLEL", "4"))
 DISTILL_MAX_TOKENS: int = int(os.environ.get("DISTILL_MAX_TOKENS", "16384"))
 CLASSIFY_MAX_TOKENS: int = int(os.environ.get("CLASSIFY_MAX_TOKENS", "2048"))
 LLM_TIMEOUT: float = float(os.environ.get("SF_LLM_TIMEOUT", "180"))
+# Some gateways sit behind Cloudflare, which 403s the default "Python-urllib/x.y"
+# User-Agent (error 1010 — banned client signature). Send a normal browser UA so
+# the request is allowed (curl works for the same reason). Configurable.
+LLM_USER_AGENT: str = os.environ.get(
+    "SF_LLM_USER_AGENT",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+)

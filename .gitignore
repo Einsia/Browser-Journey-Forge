@@ -35,3 +35,6 @@ desktop/src-tauri/binaries/
 
 # build stamp (written by build scripts)
 app/dist/build.json
+
+# updater signing keys (do not commit)
+.updater-keys/

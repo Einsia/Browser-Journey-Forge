@@ -448,6 +448,7 @@ def _ingest_distill_install(upload_id: str) -> None:
         with _PIPELINE_LOCK:
             hprogress.set_reporter(_rep)
             _apply_harness_config(cfg)
+            n_before = len(_read_json_file(HARNESS_STATE / "buckets.json", {}).get("buckets", {}))
             _rep("ingest", 0, 0, "atomizing")
             run_ingest_file(trace_json)
             run_distill()
@@ -460,6 +461,13 @@ def _ingest_distill_install(upload_id: str) -> None:
         if not installed:
             note = ("No skills produced — likely the classify/distill LLM call failed "
                     "(check the LLM key/base/model; a custom gateway may not serve the model).")
+        elif n_buckets == n_before:
+            # The pipeline "succeeded" but THIS recording added no new capability
+            # bucket — almost always classify failing for its segments (e.g. the
+            # gateway 403'd the calls). Don't report a silent success.
+            note = ("This recording produced 0 new skills — its segments were not "
+                    "classified (check the logs: the classify LLM calls likely failed). "
+                    "Use Reprocess after fixing the LLM gateway.")
         with update_meta(upload_id) as meta:
             meta["distill_status"] = "done"
             meta["distill_result"] = {"ok": True, "installed_count": len(installed),
@@ -507,6 +515,7 @@ def api_traj(authorization: str = Header(None)):
             "created_at": m.get("created_at"),
             "n_chunks": len(m.get("accepted_chunks", [])),
             "progress": _PROGRESS.get(m.get("upload_id")),
+            "note": (m.get("distill_result") or {}).get("note", ""),
         })
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"trajectories": items}
