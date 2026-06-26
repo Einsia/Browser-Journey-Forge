@@ -1250,13 +1250,14 @@ def api_logs(authorization: str = Header(None), lines: int = 400):
         tail = "\n".join(data.splitlines()[-max(1, min(lines, 5000)):])
     except OSError:
         tail = ""
-    return {"path": str(LOG_FILE), "log": tail}
+    return JSONResponse({"path": str(LOG_FILE), "log": tail}, headers=_NOCACHE)
 
 
 @app.get("/api/version")
 def api_version():
     """The build SHA baked in at freeze time (app/dist/build.json). Lets the
-    panel show which build is actually running — no auth so it always renders."""
+    panel show which build is actually running — no auth so it always renders.
+    no-store so the WebView never serves a stale version across app updates."""
     f = APP_BUILD / "build.json"
     sha = "dev"
     if f.is_file():
@@ -1264,7 +1265,7 @@ def api_version():
             sha = json.loads(f.read_text()).get("sha", "dev")
         except (json.JSONDecodeError, OSError):
             pass
-    return {"sha": sha}
+    return JSONResponse({"sha": sha}, headers=_NOCACHE)
 
 
 @app.get("/")
