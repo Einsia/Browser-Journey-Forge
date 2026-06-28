@@ -1253,6 +1253,85 @@ async def api_codex_mcp(request: Request, authorization: str = Header(None)):
     }
 
 
+# ── Claude Code integration (MCP via ~/.claude.json — JSON, user scope) ───────
+def _claude_code_config_path() -> Path:
+    """Claude Code reads user-scope MCP servers from ~/.claude.json's top-level
+    `mcpServers` key. Same JSON entry shape as Claude Desktop; different file."""
+    override = os.environ.get("JFL_CLAUDE_CODE_CONFIG")
+    if override:
+        return Path(override)
+    return Path.home() / ".claude.json"
+
+
+@app.get("/api/cc/config")
+def api_cc_config(authorization: str = Header(None)):
+    _check_auth(authorization)
+    cfg_path = _claude_code_config_path()
+    exists = cfg_path.exists()
+    pw = sk = False
+    if exists:
+        try:
+            servers = (json.loads(cfg_path.read_text()).get("mcpServers") or {})
+            pw, sk = "playwright" in servers, "journey-forge-skills" in servers
+        except (json.JSONDecodeError, OSError):
+            pass
+    npx, node = _find_npx()
+    return {
+        "config_path": str(cfg_path),
+        "config_exists": exists,
+        "playwright_configured": pw,
+        "skills_mcp_configured": sk,
+        "node_found": bool(npx),
+        "node_version": _node_version(node),
+        "npx_path": npx,
+    }
+
+
+@app.post("/api/cc/mcp")
+async def api_cc_mcp(request: Request, authorization: str = Header(None)):
+    """Declaratively set our MCP servers in Claude Code's ~/.claude.json (JSON
+    mirror of /api/desktop/mcp). Body: {"playwright": bool, "skills": bool}.
+    Backs up the file before writing. Unlike Desktop, Claude Code picks up the
+    change in the NEXT session — no app restart, just open a new `claude`."""
+    _check_auth(authorization)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    want_pw = bool(body.get("playwright"))
+    want_skills = bool(body.get("skills"))
+    if want_pw and not _find_npx()[0]:
+        raise HTTPException(400, "Node.js / npx not found — install it first (Install Node)")
+    cfg_path = _claude_code_config_path()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text())
+        except json.JSONDecodeError:
+            raise HTTPException(422, f"{cfg_path} is not valid JSON; fix or remove it first")
+        shutil.copy2(cfg_path, cfg_path.with_suffix(cfg_path.suffix + ".jfl.bak"))
+    servers = data.setdefault("mcpServers", {})
+    if want_pw:
+        servers["playwright"] = _playwright_entry()
+    else:
+        servers.pop("playwright", None)
+    if want_skills:
+        servers["journey-forge-skills"] = _skill_mcp_entry()
+    else:
+        servers.pop("journey-forge-skills", None)
+    _atomic_write(cfg_path, json.dumps(data, indent=2, ensure_ascii=False))
+    logger.info("[claude-code] MCP set playwright=%s skills=%s in %s", want_pw, want_skills, cfg_path)
+    return {
+        "ok": True,
+        "playwright": want_pw,
+        "skills": want_skills,
+        "config_path": str(cfg_path),
+        "restart_required": False,
+        "message": "Updated Claude Code MCP servers. Open a new Claude Code session to use them.",
+    }
+
+
 # ── Static control panel (mounted last so /api & /v1 win) ────────────────────
 # The panel is a single self-contained HTML doc. The native app's WKWebView
 # caches it aggressively (same 127.0.0.1:8099 URL across app versions), so a new

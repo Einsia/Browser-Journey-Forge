@@ -236,7 +236,8 @@ function agentBlock(title, d, kind){
   if(!d) return `<div class="sub">${title}</div><p class="mut">unavailable (check the server key)</p>`;
   const pw = !!d.playwright_configured, sk = !!d.skills_mcp_configured;
   const pwToggleable = d.node_found || pw;
-  const fn = kind==='claude' ? 'setMcp' : 'setCodexMcp';
+  const fn = kind==='claude' ? 'setMcp' : kind==='codex' ? 'setCodexMcp' : 'setCcMcp';
+  const note = kind==='cc' ? '<span class="mut"> · new session, no restart</span>' : '';
   return `
     <div class="sub">${title}</div>
     <div class="toggle-row">
@@ -245,28 +246,30 @@ function agentBlock(title, d, kind){
     </div>
     <div class="toggle-row">
       <label class="sw"><input type="checkbox" ${sk?'checked':''} onchange="${fn}(${pw}, this.checked)"><span class="sl"></span></label>
-      <div>Distilled skills (<code>get_skill</code> MCP) ${sk?'<span class="ok">on</span>':'<span class="mut">off</span>'}</div>
+      <div>Distilled skills (<code>get_skill</code> MCP) ${sk?'<span class="ok">on</span>':'<span class="mut">off</span>'}${note}</div>
     </div>
     <p class="meta">Config: <code>${esc(d.config_path)}</code>${d.config_exists===false?' (will be created)':''}</p>`;
 }
 async function renderAgents(){
   const el=$('#cfg_agents'); if(!el) return;
-  let cd=null, cx=null;
+  let cd=null, cx=null, cc=null;
   try{ cd = await api('/api/desktop/config'); }catch(e){}
   try{ cx = await api('/api/codex/config'); }catch(e){}
-  if(!cd && !cx){ el.innerHTML=`<h2>Agent connections</h2><span class="err">Could not load agent status — check the server key.</span>`; return; }
-  const nodeFound = (cd&&cd.node_found) || (cx&&cx.node_found);
-  const nodeVer = (cd&&cd.node_version) || (cx&&cx.node_version) || '';
-  const npx = (cd&&cd.npx_path) || '';
+  try{ cc = await api('/api/cc/config'); }catch(e){}
+  if(!cd && !cx && !cc){ el.innerHTML=`<h2>Agent connections</h2><span class="err">Could not load agent status — check the server key.</span>`; return; }
+  const nodeFound = (cd&&cd.node_found) || (cx&&cx.node_found) || (cc&&cc.node_found);
+  const nodeVer = (cd&&cd.node_version) || (cx&&cx.node_version) || (cc&&cc.node_version) || '';
+  const npx = (cd&&cd.npx_path) || (cc&&cc.npx_path) || '';
   const nodeRow = nodeFound
     ? `<span class="ok">Node ${esc(nodeVer)}</span> <code>${esc(npx)}</code>`
     : `<span class="err">Node / npx not found</span> — required for browser control (Playwright)`;
   const nodeBtn = nodeFound ? '' : `<button class="act" onclick="installNode()">Install Node (one-click)</button>`;
   el.innerHTML = `<h2>Agent connections</h2>
-    <p class="mut">Let an agent drive the browser (Playwright) and pull your distilled skills (<code>get_skill</code>). Recording works without this — it only affects execution. Restart the agent once after changing a toggle.</p>
+    <p class="mut">Let an agent drive the browser (Playwright) and pull your distilled skills (<code>get_skill</code>). Recording works without this — it only affects execution. Restart the agent once after changing a toggle (Claude Code picks it up in a new session).</p>
     <p class="meta">Node: ${nodeRow}</p>
     ${nodeBtn?`<div class="row" style="margin:6px 0">${nodeBtn}</div>`:''}
     ${agentBlock('Claude Desktop', cd, 'claude')}
+    ${agentBlock('Claude Code', cc, 'cc')}
     ${agentBlock('Codex', cx, 'codex')}`;
 }
 window.installNode = async ()=>{ toast('Downloading Node… (~30s)'); try{ const r=await api('/api/desktop/install-node',{method:'POST'}); toast('Node ready: '+(r.version||r.npx)); renderAgents(); }catch(e){ toast(e.message,true);} };
@@ -277,6 +280,11 @@ window.setMcp = async (playwright, skills)=>{
 };
 window.setCodexMcp = async (playwright, skills)=>{
   try{ const r=await api('/api/codex/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playwright,skills})}); toast(r.message); }
+  catch(e){ toast(e.message,true); }
+  renderAgents();
+};
+window.setCcMcp = async (playwright, skills)=>{
+  try{ const r=await api('/api/cc/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playwright,skills})}); toast(r.message); }
   catch(e){ toast(e.message,true); }
   renderAgents();
 };
